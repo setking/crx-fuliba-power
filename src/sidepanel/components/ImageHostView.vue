@@ -49,11 +49,19 @@ async function loadSessionUuid() {
 
 async function loadHistory() {
   const stored = await chrome.storage.local.get(IMAGE_HISTORY_KEY)
-  const list = stored[IMAGE_HISTORY_KEY]
-  if (Array.isArray(list)) {
-    history.value = list.filter(isUploadedImage)
-  } else {
-    history.value = []
+  const raw = stored[IMAGE_HISTORY_KEY]
+  // 兼容两种形态：标准数组 `[{...}]` / 被错误序列化成的"数字键对象" `{"0": {...}}`。
+  // chrome.storage.local 内部 JSON 序列化偶发会让 array 变 object —— 用 Object.values 平摊回去。
+  const isArray = Array.isArray(raw)
+  const list: unknown[] = isArray
+    ? raw
+    : (raw && typeof raw === 'object' ? Object.values(raw as Record<string, unknown>) : [])
+  const cleaned = list.filter(isUploadedImage)
+  history.value = cleaned
+
+  // 矫正脏数据：检测到对象形态就写回真数组，下次启动走正常路径
+  if (!isArray && cleaned.length > 0) {
+    await chrome.storage.local.set({ [IMAGE_HISTORY_KEY]: Array.from(cleaned) })
   }
 }
 
@@ -65,8 +73,12 @@ async function saveHistory(next: UploadedImage[]) {
     seen.add(item.url)
     dedup.push(item)
   }
-  history.value = dedup.slice(0, IMAGE_HISTORY_LIMIT)
-  await chrome.storage.local.set({ [IMAGE_HISTORY_KEY]: history.value })
+  const trimmed = dedup.slice(0, IMAGE_HISTORY_LIMIT)
+  // 显式包一层 Array.from —— chrome.storage.local 在某些边界会把数组序列化成
+  // 数字键对象 `{"0": {...}}`，Array.from 强制走 Array 构造路径
+  const normalized = Array.from(trimmed)
+  history.value = normalized
+  await chrome.storage.local.set({ [IMAGE_HISTORY_KEY]: normalized })
 }
 
 function isUploadedImage(value: unknown): value is UploadedImage {
@@ -454,6 +466,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.75rem;
   padding: 0.75rem 1rem 1rem;
+  color: var(--crx-text);
 }
 
 .ih-header {
@@ -466,14 +479,15 @@ onBeforeUnmount(() => {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
+  color: var(--crx-text);
 }
 
 .ih-btn-ghost {
   padding: 0.3rem 0.7rem;
   font-size: 0.8rem;
-  background: white;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: var(--crx-surface);
+  color: var(--crx-text);
+  border: 1px solid var(--crx-border-strong);
   border-radius: 6px;
   cursor: pointer;
 }
@@ -484,7 +498,7 @@ onBeforeUnmount(() => {
 }
 
 .ih-btn-ghost:not(:disabled):hover {
-  background: #f3f4f6;
+  background: var(--crx-surface-alt);
 }
 
 .ih-banner {
@@ -494,20 +508,20 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 0.5rem 0.7rem;
   font-size: 0.78rem;
-  color: #374151;
-  background: #f3f4f6;
+  color: var(--crx-text);
+  background: var(--crx-surface-alt);
   border-radius: 6px;
 }
 
 .ih-banner a {
-  color: #2563eb;
+  color: var(--crx-primary-hover);
   word-break: break-all;
 }
 
 .ih-uuid code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
-  color: #1f2937;
+  color: var(--crx-text);
 }
 
 .ih-drop {
@@ -520,8 +534,8 @@ onBeforeUnmount(() => {
   min-height: 96px;
   padding: 1rem;
   text-align: center;
-  background: white;
-  border: 2px dashed #cbd5e1;
+  background: var(--crx-surface);
+  border: 2px dashed var(--crx-dashed);
   border-radius: 8px;
   cursor: pointer;
   transition: background 150ms, border-color 150ms;
@@ -529,20 +543,20 @@ onBeforeUnmount(() => {
 
 .ih-drop:hover,
 .ih-drop.active {
-  background: #eff6ff;
-  border-color: #3b82f6;
+  background: var(--crx-primary-soft);
+  border-color: var(--crx-primary);
 }
 
 .ih-drop-primary {
   margin: 0;
   font-size: 0.85rem;
-  color: #1f2937;
+  color: var(--crx-text);
 }
 
 .ih-drop-sub {
   margin: 0;
   font-size: 0.72rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
 }
 
 .ih-file-input {
@@ -564,25 +578,25 @@ onBeforeUnmount(() => {
 
 .ih-stat {
   font-size: 0.72rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
 }
 
 .ih-btn-primary {
   padding: 0.3rem 0.85rem;
   font-size: 0.8rem;
-  color: white;
-  background: #10b981;
+  color: var(--crx-on-primary);
+  background: var(--crx-checkin);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .ih-btn-primary:not(:disabled):hover {
-  background: #059669;
+  background: var(--crx-checkin-hover);
 }
 
 .ih-btn-primary:disabled {
-  background: #9ca3af;
+  background: var(--crx-disabled-fg);
   cursor: not-allowed;
 }
 
@@ -600,22 +614,22 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 0.35rem 0.6rem;
   font-size: 0.78rem;
-  color: #1e40af;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  color: var(--crx-text-on-soft);
+  background: var(--crx-primary-soft);
+  border: 1px solid var(--crx-primary-soft-border);
   border-radius: 6px;
 }
 
 .ih-selection-text code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
-  color: #1e40af;
+  color: var(--crx-text-on-soft);
 }
 
 .ih-format-tab {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--crx-border);
   border-radius: 6px;
-  background: white;
+  background: var(--crx-surface);
   overflow: hidden;
 }
 
@@ -624,14 +638,14 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   padding: 0.35rem 0.6rem;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--crx-bg);
+  border-bottom: 1px solid var(--crx-border);
 }
 
 .ih-format-tab-label {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--crx-text);
 }
 
 .ih-format-tab-body {
@@ -640,21 +654,21 @@ onBeforeUnmount(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
   line-height: 1.5;
-  color: #1f2937;
+  color: var(--crx-text);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: 7.5em;
   overflow: auto;
-  background: white;
+  background: var(--crx-surface);
 }
 
 .ih-empty {
   padding: 1.5rem;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
   text-align: center;
-  background: white;
-  border: 1px dashed #e5e7eb;
+  background: var(--crx-surface);
+  border: 1px dashed var(--crx-border);
   border-radius: 8px;
 }
 
@@ -670,8 +684,8 @@ onBeforeUnmount(() => {
 .ih-card {
   display: flex;
   flex-direction: column;
-  background: white;
-  border: 1px solid #e5e7eb;
+  background: var(--crx-surface);
+  border: 1px solid var(--crx-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -681,25 +695,25 @@ onBeforeUnmount(() => {
 }
 
 .ih-card.selectable:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--crx-primary-hover);
   outline-offset: 2px;
 }
 
 .ih-card.selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  border-color: var(--crx-primary-hover);
+  box-shadow: 0 0 0 2px var(--crx-primary-ring);
 }
 
 .ih-card[data-status='error'] {
-  border-color: #fca5a5;
+  border-color: var(--crx-danger-edge);
 }
 
 .ih-card[data-status='done'] {
-  border-color: #86efac;
+  border-color: var(--crx-success-edge);
 }
 
 .ih-card.selected[data-status='done'] {
-  border-color: #2563eb;
+  border-color: var(--crx-primary-hover);
 }
 
 .ih-thumb {
@@ -709,7 +723,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 100%;
   aspect-ratio: 1 / 1;
-  background: #f9fafb;
+  background: var(--crx-bg);
 }
 
 .ih-thumb img {
@@ -723,7 +737,7 @@ onBeforeUnmount(() => {
   inset: 0;
   display: flex;
   align-items: flex-end;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--crx-overlay);
 }
 
 .ih-progress-bar {
@@ -731,7 +745,7 @@ onBeforeUnmount(() => {
   width: 40%;
   height: 4px;
   margin-bottom: 0;
-  background: #2563eb;
+  background: var(--crx-primary-hover);
   border-radius: 2px;
   animation: ih-indeterminate 1.2s ease-in-out infinite;
 }
@@ -755,7 +769,7 @@ onBeforeUnmount(() => {
 
 .ih-name {
   font-size: 0.78rem;
-  color: #1f2937;
+  color: var(--crx-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -765,28 +779,28 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   font-size: 0.7rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
 }
 
 .ih-status.is-queued {
-  color: #6b7280;
+  color: var(--crx-text-muted);
 }
 
 .ih-status.is-uploading {
-  color: #2563eb;
+  color: var(--crx-primary-hover);
 }
 
 .ih-status.is-done {
-  color: #059669;
+  color: var(--crx-checkin-hover);
 }
 
 .ih-status.is-error {
-  color: #b91c1c;
+  color: var(--crx-danger-strong);
 }
 
 .ih-error {
   font-size: 0.7rem;
-  color: #b91c1c;
+  color: var(--crx-danger-strong);
   word-break: break-all;
 }
 
@@ -799,15 +813,15 @@ onBeforeUnmount(() => {
 .ih-btn-mini {
   padding: 0.2rem 0.5rem;
   font-size: 0.72rem;
-  background: white;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: var(--crx-surface);
+  color: var(--crx-text);
+  border: 1px solid var(--crx-border-strong);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .ih-btn-mini:hover {
-  background: #f3f4f6;
+  background: var(--crx-surface-alt);
 }
 
 .ih-btn-mini:disabled {
@@ -816,7 +830,7 @@ onBeforeUnmount(() => {
 }
 
 .ih-btn-mini.is-danger {
-  color: #b91c1c;
+  color: var(--crx-danger-strong);
 }
 
 /* 清空行：与顶部 ih-controls 的「开始上传」位置对齐到右边 */
@@ -835,7 +849,7 @@ onBeforeUnmount(() => {
 .ih-history-title {
   margin: 0;
   font-size: 0.85rem;
-  color: #374151;
+  color: var(--crx-text);
 }
 
 .ih-history-grid {
@@ -853,7 +867,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   aspect-ratio: 1 / 1;
-  background: #f9fafb;
+  background: var(--crx-bg);
   border: 2px solid transparent;
   border-radius: 6px;
   overflow: hidden;
@@ -866,13 +880,13 @@ onBeforeUnmount(() => {
 }
 
 .ih-history-item:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--crx-primary-hover);
   outline-offset: 2px;
 }
 
 .ih-history-item.selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  border-color: var(--crx-primary-hover);
+  box-shadow: 0 0 0 2px var(--crx-primary-ring);
 }
 
 .ih-history-item img {

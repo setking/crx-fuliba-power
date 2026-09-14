@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { DEFAULT_PAGE_SIZE, MESSAGE_TYPES } from '@/global'
 import type { Favorite, ForumCount, ForumCounts, ForumTab, Friend, LoginStatus, Thread } from '@/type'
 import ForumList from '@/sidepanel/components/ForumList.vue'
@@ -7,6 +7,8 @@ import ImageHostView from '@/sidepanel/components/ImageHostView.vue'
 import SearchView from '@/sidepanel/components/SearchView.vue'
 import { fetchViaContent, getActiveTab } from '@/utils/extension'
 import { createRequestCache, getPageCount, getRequestPageCount, itemsForDisplayPage, normalizePage, type RequestCache } from '@/utils/pagination'
+import { FORUM_THEME_KEY, effectiveTheme } from '@/utils/theme'
+import type { ForumTheme } from '@/type'
 import userIcon from '@/assets/user.svg'
 import searchIcon from '@/assets/search.svg'
 import imageHostIcon from '@/assets/imgs.svg'
@@ -314,14 +316,53 @@ function openInTab(url: string) {
   chrome.tabs.create({ url })
 }
 
+/** 监听 forumTheme 变更（content script 写入时触发）。
+ * 抽出命名函数以便 onUnmounted 移除：MV3 Side Panel 每次打开都会
+ * 重建 Vue 应用，否则 listener 会越积越多，引用着已卸载的响应式 ref。 */
+function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, area: string) {
+  if (area !== 'local') return
+  const themeChange = changes[FORUM_THEME_KEY]
+  if (!themeChange) return
+  const next = themeChange.newValue
+  forumTheme.value = (next === 'dark' || next === 'light') ? next : 'unknown'
+  applyEffectiveTheme()
+}
+
 onMounted(async () => {
+  await loadThemeState()
   await probe()
 
   if (loginStatus.value === 'logged-in') {
     await loadCounts()
     await loadThreads()
   }
+
+  chrome.storage.onChanged.addListener(handleStorageChange)
 })
+
+onUnmounted(() => {
+  chrome.storage.onChanged.removeListener(handleStorageChange)
+})
+
+// ============ 主题状态 ============
+// 论坛当前主题（content script 写入）；sidepanel 完全跟随，不暴露手动开关。
+// 详见 CLAUDE.md §6.7。
+const forumTheme = ref<ForumTheme>('unknown')
+
+const effectiveThemeValue = computed(() => effectiveTheme(forumTheme.value))
+
+/** 把 effectiveTheme 写到 `<html data-theme>`，CSS 变量在 style.css 里切换 light/dark。 */
+function applyEffectiveTheme() {
+  document.documentElement.dataset.theme = effectiveThemeValue.value
+}
+
+/** 启动时从 storage 读取 forumTheme。 */
+async function loadThemeState() {
+  const stored = await chrome.storage.local.get([FORUM_THEME_KEY])
+  const ft = stored[FORUM_THEME_KEY]
+  if (ft === 'dark' || ft === 'light') forumTheme.value = ft
+  applyEffectiveTheme()
+}
 </script>
 
 <template>
@@ -331,9 +372,11 @@ onMounted(async () => {
         <h1 class="title">
           🔖 论坛助手
         </h1>
-        <button class="refresh" :disabled="loginStatus !== 'logged-in'" @click="refresh">
-          ⟳ 刷新
-        </button>
+        <div class="header-actions">
+          <button class="refresh" :disabled="loginStatus !== 'logged-in'" @click="refresh">
+            ⟳ 刷新
+          </button>
+        </div>
       </header>
 
       <div class="status-bar" :class="loginStatus">
@@ -404,8 +447,8 @@ onMounted(async () => {
   min-height: 100vh;
   display: flex;
   font-family: ui-sans-serif, system-ui, sans-serif;
-  color: #1f2937;
-  background: #f9fafb;
+  color: var(--crx-text);
+  background: var(--crx-bg);
 }
 
 .panel-content {
@@ -422,8 +465,8 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--crx-surface);
+  border-bottom: 1px solid var(--crx-border);
 }
 
 .title {
@@ -432,50 +475,56 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .refresh {
   padding: 0.4rem 0.85rem;
   font-size: 0.85rem;
-  background: #3b82f6;
-  color: white;
+  background: var(--crx-primary);
+  color: var(--crx-on-primary);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .refresh:disabled {
-  background: #9ca3af;
+  background: var(--crx-disabled-fg);
   cursor: not-allowed;
 }
 
 .refresh:not(:disabled):hover {
-  background: #2563eb;
+  background: var(--crx-primary-hover);
 }
 
 .status-bar {
   padding: 0.5rem 1rem;
   font-size: 0.8rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--crx-border);
 }
 
 .status-bar.logged-in {
-  background: #d1fae5;
-  color: #065f46;
+  background: var(--crx-success-bg);
+  color: var(--crx-success-fg);
 }
 
 .status-bar.logged-out {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--crx-danger-bg);
+  color: var(--crx-danger-fg);
 }
 
 .status-bar.unknown {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: var(--crx-surface-alt);
+  color: var(--crx-text-muted);
 }
 
 .tabs {
   display: flex;
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
+  background: var(--crx-surface);
+  border-bottom: 1px solid var(--crx-border);
 }
 
 .tab {
@@ -485,28 +534,28 @@ onMounted(async () => {
   border: none;
   border-bottom: 2px solid transparent;
   font-size: 0.85rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
   cursor: pointer;
   transition: all 150ms;
 }
 
 .tab:hover {
-  color: #1f2937;
-  background: #f3f4f6;
+  color: var(--crx-text);
+  background: var(--crx-surface-alt);
 }
 
 .tab.active {
-  color: #3b82f6;
-  border-bottom-color: #3b82f6;
+  color: var(--crx-primary);
+  border-bottom-color: var(--crx-primary);
   font-weight: 600;
 }
 
 .error {
   padding: 0.5rem 1rem;
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--crx-warning-bg);
+  color: var(--crx-warning-fg);
   font-size: 0.85rem;
-  border-bottom: 1px solid #fde68a;
+  border-bottom: 1px solid var(--crx-warning-border);
 }
 
 .image-host-view {
@@ -515,7 +564,7 @@ onMounted(async () => {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f9fafb;
+  background: var(--crx-bg);
 }
 
 .option-rail {
@@ -527,8 +576,8 @@ onMounted(async () => {
   align-items: center;
   gap: 0.35rem;
   padding: 0.5rem 0.35rem;
-  background: white;
-  border-left: 1px solid #e5e7eb;
+  background: var(--crx-surface);
+  border-left: 1px solid var(--crx-border);
 }
 
 .option-button {
@@ -543,20 +592,20 @@ onMounted(async () => {
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #6b7280;
+  color: var(--crx-text-muted);
   cursor: pointer;
   transition: background 150ms, color 150ms, border-color 150ms;
 }
 
 .option-button:hover {
-  background: #f3f4f6;
-  color: #1f2937;
+  background: var(--crx-surface-alt);
+  color: var(--crx-text);
 }
 
 .option-button.active {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #2563eb;
+  border-color: var(--crx-primary-soft-border);
+  background: var(--crx-primary-soft);
+  color: var(--crx-primary-hover);
 }
 
 .option-icon {

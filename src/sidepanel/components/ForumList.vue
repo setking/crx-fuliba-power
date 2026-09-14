@@ -161,7 +161,7 @@ function jumpToPage() {
 .empty {
   padding: 2rem 1rem;
   text-align: center;
-  color: #9ca3af;
+  color: var(--crx-text-subtle);
   font-size: 0.9rem;
 }
 
@@ -173,20 +173,20 @@ function jumpToPage() {
 
 .item {
   padding: 0.75rem 1rem;
-  background: white;
-  border-bottom: 1px solid #f3f4f6;
+  background: var(--crx-surface);
+  border-bottom: 1px solid var(--crx-border);
   cursor: pointer;
   transition: background 100ms;
 }
 
 .item:hover {
-  background: #f9fafb;
+  background: var(--crx-bg);
 }
 
 .thread-title {
   font-size: 0.9rem;
   font-weight: 500;
-  color: #1f2937;
+  color: var(--crx-text);
   margin-bottom: 0.25rem;
   line-height: 1.4;
   text-align: left;
@@ -198,7 +198,7 @@ function jumpToPage() {
   align-items: baseline;
   justify-content: space-between;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
 }
 
 .thread-meta .replies {
@@ -207,14 +207,14 @@ function jumpToPage() {
 }
 
 .author {
-  color: #4b5563;
+  color: var(--crx-text-muted);
 }
 
 .fav-title {
   flex: 1;
   min-width: 0;
   font-size: 0.9rem;
-  color: #1f2937;
+  color: var(--crx-text);
   text-align: left;
   overflow-wrap: anywhere;
 }
@@ -232,7 +232,7 @@ function jumpToPage() {
   margin-top: 0;
   margin-left: auto;
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--crx-text-subtle);
   text-align: right;
   overflow-wrap: anywhere;
 }
@@ -240,7 +240,7 @@ function jumpToPage() {
 .search-result-title {
   font-size: 0.9rem;
   font-weight: 500;
-  color: #1f2937;
+  color: var(--crx-text);
   line-height: 1.4;
   text-align: left;
   overflow-wrap: anywhere;
@@ -253,7 +253,7 @@ function jumpToPage() {
   gap: 0.5rem;
   margin-top: 0.25rem;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--crx-text-muted);
   text-align: right;
 }
 
@@ -271,8 +271,8 @@ function jumpToPage() {
   gap: 0.35rem;
   padding: 0.5rem;
   border-radius: 6px;
-  border: 1px solid #f3f4f6;
-  background: white;
+  border: 1px solid var(--crx-border);
+  background: var(--crx-surface);
 }
 
 .avatar {
@@ -280,13 +280,13 @@ function jumpToPage() {
   height: 48px;
   border-radius: 50%;
   object-fit: cover;
-  background: #f3f4f6;
+  background: var(--crx-surface-alt);
 }
 
 .friend-name {
   font-size: 0.75rem;
   text-align: center;
-  color: #1f2937;
+  color: var(--crx-text);
   word-break: break-all;
 }
 
@@ -297,38 +297,38 @@ function jumpToPage() {
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  background: white;
-  border-top: 1px solid #e5e7eb;
+  background: var(--crx-surface);
+  border-top: 1px solid var(--crx-border);
 }
 
 .page-button {
   width: 32px;
   height: 32px;
   padding: 0;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--crx-border-strong);
   border-radius: 6px;
-  background: white;
-  color: #1f2937;
+  background: var(--crx-surface);
+  color: var(--crx-text);
   font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .page-button:hover:not(:disabled) {
-  border-color: #3b82f6;
-  color: #2563eb;
+  border-color: var(--crx-primary);
+  color: var(--crx-primary-hover);
 }
 
 .page-button:disabled {
-  color: #9ca3af;
-  background: #f3f4f6;
+  color: var(--crx-text-subtle);
+  background: var(--crx-surface-alt);
   cursor: not-allowed;
 }
 
 .page-indicator {
   min-width: 6rem;
   text-align: center;
-  color: #4b5563;
+  color: var(--crx-text-muted);
   font-size: 0.8rem;
 }
 
@@ -344,32 +344,32 @@ function jumpToPage() {
   width: 3.25rem;
   height: 32px;
   padding: 0 0.35rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--crx-border-strong);
   border-radius: 6px;
-  color: #1f2937;
-  background: white;
+  color: var(--crx-text);
+  background: var(--crx-input-bg);
   text-align: center;
 }
 
 .jump-input:focus {
-  outline: 2px solid #bfdbfe;
+  outline: 2px solid var(--crx-primary-soft-border);
   outline-offset: 1px;
-  border-color: #3b82f6;
+  border-color: var(--crx-primary);
 }
 
 .jump-button {
   height: 32px;
   padding: 0 0.65rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--crx-border-strong);
   border-radius: 6px;
-  color: #1f2937;
-  background: white;
+  color: var(--crx-text);
+  background: var(--crx-surface);
   font-size: 0.8rem;
   cursor: pointer;
 }
 
 .jump-button:hover {
-  border-color: #3b82f6;
-  color: #2563eb;
+  border-color: var(--crx-primary);
+  color: var(--crx-primary-hover);
 }
 </style>

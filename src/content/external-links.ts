@@ -9,87 +9,120 @@
 
 import { EXTERNAL_LINKS_PANEL_ID } from '@/global'
 import { extractPostExternalLinks, isViewthreadPage, type ExternalLink } from '@/utils/hidden-links'
+import { applyPanelTheme, buildThemedStyle, markThemedHost } from '@/utils/panel-theme'
 
-const EXTERNAL_LINKS_BASE_CSS = [
-  'padding: 12px 16px',
-  'border: 1px solid #e5e7eb',
-  'border-radius: 8px',
-  'background: #f9fafb',
-  'font-family: ui-sans-serif, system-ui, sans-serif',
-  'font-size: 13px',
-  'color: #1f2937',
-  'box-sizing: border-box',
-  'max-width: 100%',
+const EXTERNAL_LINKS_BASE_CSS =
+  [
+    'padding: 12px 16px',
+    'border: 1px solid var(--panel-border)',
+    'border-radius: 8px',
+    'background: var(--panel-bg)',
+    'font-family: ui-sans-serif, system-ui, sans-serif',
+    'font-size: 13px',
+    'color: var(--panel-text)',
+    'box-sizing: border-box',
+    'max-width: 100%',
+  ].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_HEADER_CSS =
+  [
+    'cursor: pointer',
+    'font-weight: 600',
+    'font-size: 14px',
+    'color: var(--panel-text)',
+    'list-style: none',
+    'padding: 6px 8px',
+    'border-radius: 4px',
+    'user-select: none',
+  ].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_HEADER_INNER_CSS =
+  ['display: inline-flex', 'align-items: center', 'gap: 8px'].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_ARROW_CSS =
+  [
+    'display: inline-block',
+    'transition: transform 150ms ease',
+    'font-size: 12px',
+    'color: var(--panel-text-muted)'
+  ].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_LIST_CSS =
+  [
+    'margin: 8px 0 0',
+    'padding: 0',
+    'list-style: none',
+    'display: flex',
+    'flex-direction: column',
+    'gap: 8px',
+  ].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_ITEM_CSS =
+  [
+    'display: flex',
+    'align-items: center',
+    'gap: 10px',
+    'padding: 8px 10px',
+    'border: 1px solid #e5e7eb',
+    'border-radius: 6px',
+    'background: var(--panel-surface)'
+  ].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_HOST_CSS =
+  ['flex: 0 0 auto', 'font-weight: 500', 'color: var(--panel-link)'].join('!important; ') + '!important'
+
+const EXTERNAL_LINKS_URL_CSS =
+  [
+    'flex: 1',
+    'min-width: 0',
+    'overflow: hidden',
+    'text-overflow: ellipsis',
+    'white-space: nowrap',
+    'color: var(--panel-text-muted)',
+    'text-decoration: none',
+  ].join('!important; ') + '!important'
+
+/** 默认态：高对比主色按钮（accent 背景 + on-accent 文字），配 hover 加深 + active 内移 + 状态色 */
+const EXTERNAL_LINKS_COPY_CSS =
+  [
+    'flex: 0 0 auto',
+    'padding: 5px 12px',
+    'border: 1px solid var(--panel-accent)',
+    'border-radius: 4px',
+    'background: var(--panel-accent)',
+    'color: var(--panel-on-accent)',
+    'font-size: 12px',
+    'font-weight: 600',
+    'line-height: 1.2',
+    'cursor: pointer',
+    'transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease, box-shadow 120ms ease',
+    'box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08)',
+    'user-select: none',
+  ].join('!important; ') + '!important'
+
+/** 状态色：直接覆盖到 style.cssText 上（inline style 优先级最高，
+ * 不能放 ShadowRoot 的 <style> 里 —— 那样会被 inline style 压住）。 */
+const EXTERNAL_LINKS_COPY_HOVER_CSS = [
+  'background: var(--panel-accent-hover)',
+  'border-color: var(--panel-accent-hover)',
+  'box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12)',
 ].join('!important; ') + '!important'
 
-const EXTERNAL_LINKS_HEADER_CSS = [
-  'cursor: pointer',
-  'font-weight: 600',
-  'font-size: 14px',
-  'color: #1f2937',
-  'list-style: none',
-  'padding: 6px 8px',
-  'border-radius: 4px',
-  'user-select: none',
+const EXTERNAL_LINKS_COPY_ACTIVE_CSS = [
+  'transform: translateY(1px)',
+  'box-shadow: 0 0 0 rgba(0, 0, 0, 0)',
 ].join('!important; ') + '!important'
 
-const EXTERNAL_LINKS_HEADER_INNER_CSS = [
-  'display: inline-flex',
-  'align-items: center',
-  'gap: 8px',
+const EXTERNAL_LINKS_COPY_DONE_CSS = [
+  'background: var(--panel-success)',
+  'border-color: var(--panel-success)',
+  'color: var(--panel-on-accent)',
 ].join('!important; ') + '!important'
 
-const EXTERNAL_LINKS_ARROW_CSS = [
-  'display: inline-block',
-  'transition: transform 150ms ease',
-  'font-size: 12px',
-  'color: #6b7280',
-].join('!important; ') + '!important'
-
-const EXTERNAL_LINKS_LIST_CSS = [
-  'margin: 8px 0 0',
-  'padding: 0',
-  'list-style: none',
-  'display: flex',
-  'flex-direction: column',
-  'gap: 8px',
-].join('!important; ') + '!important'
-
-const EXTERNAL_LINKS_ITEM_CSS = [
-  'display: flex',
-  'align-items: center',
-  'gap: 10px',
-  'padding: 8px 10px',
-  'border: 1px solid #e5e7eb',
-  'border-radius: 6px',
-  'background: white',
-].join('!important; ') + '!important'
-
-const EXTERNAL_LINKS_HOST_CSS = [
-  'flex: 0 0 auto',
-  'font-weight: 500',
-  'color: #2563eb',
-].join('!important; ') + '!important'
-
-const EXTERNAL_LINKS_URL_CSS = [
-  'flex: 1',
-  'min-width: 0',
-  'overflow: hidden',
-  'text-overflow: ellipsis',
-  'white-space: nowrap',
-  'color: #4b5563',
-  'text-decoration: none',
-].join('!important; ') + '!important'
-
-const EXTERNAL_LINKS_COPY_CSS = [
-  'flex: 0 0 auto',
-  'padding: 4px 10px',
-  'border: 1px solid #d1d5db',
-  'border-radius: 4px',
-  'background: white',
-  'color: #374151',
-  'font-size: 12px',
-  'cursor: pointer',
+const EXTERNAL_LINKS_COPY_FAIL_CSS = [
+  'background: var(--panel-danger)',
+  'border-color: var(--panel-danger)',
+  'color: var(--panel-on-accent)',
 ].join('!important; ') + '!important'
 
 function buildExternalLinksPanel(links: ExternalLink[]): HTMLElement {
@@ -113,11 +146,12 @@ function buildExternalLinksPanel(links: ExternalLink[]): HTMLElement {
 
   const count = document.createElement('span')
   count.textContent = `(${links.length})`
-  count.style.cssText = 'color: #6b7280 !important; font-weight: 400 !important;'
+  count.style.cssText = 'color: var(--panel-text-muted) !important; font-weight: 400 !important;'
 
   const hint = document.createElement('span')
   hint.textContent = '点击展开'
-  hint.style.cssText = 'color: #9ca3af !important; font-size: 12px !important; font-weight: 400 !important; margin-left: auto !important;'
+  hint.style.cssText =
+    'color: var(--panel-text-muted) !important; font-size: 12px !important; font-weight: 400 !important; margin-left: auto !important;'
 
   inner.append(arrow, title, count, hint)
   summary.appendChild(inner)
@@ -151,18 +185,54 @@ function buildExternalLinksPanel(links: ExternalLink[]): HTMLElement {
     const copy = document.createElement('button')
     copy.type = 'button'
     copy.textContent = '复制'
+    copy.dataset.copyState = 'default'
     copy.style.cssText = EXTERNAL_LINKS_COPY_CSS
-    copy.addEventListener('click', (e) => {
+
+    /** 把当前状态对应的额外样式拼到 baseCss 后面 —— ShadowRoot 的 inline style 优先级胜过 :hover/:active，
+     * 所以状态色必须直接落到 style.cssText。 */
+    function applyCopyState(state: typeof copy.dataset.copyState): void {
+      copy.dataset.copyState = state
+      let extra = ''
+      if (state === 'hover') extra = EXTERNAL_LINKS_COPY_HOVER_CSS
+      else if (state === 'active') extra = EXTERNAL_LINKS_COPY_ACTIVE_CSS
+      else if (state === 'done') extra = EXTERNAL_LINKS_COPY_DONE_CSS
+      else if (state === 'fail') extra = EXTERNAL_LINKS_COPY_FAIL_CSS
+      copy.style.cssText = extra ? `${EXTERNAL_LINKS_COPY_CSS}; ${extra}` : EXTERNAL_LINKS_COPY_CSS
+    }
+
+    copy.addEventListener('mouseenter', () => {
+      if (copy.dataset.copyState === 'default') applyCopyState('hover')
+    })
+    copy.addEventListener('mouseleave', () => {
+      if (copy.dataset.copyState === 'hover' || copy.dataset.copyState === 'active') {
+        applyCopyState('default')
+      }
+    })
+    copy.addEventListener('mousedown', () => {
+      if (copy.dataset.copyState === 'hover') applyCopyState('active')
+    })
+    copy.addEventListener('mouseup', () => {
+      if (copy.dataset.copyState === 'active') applyCopyState('hover')
+    })
+
+    copy.addEventListener('click', e => {
       e.preventDefault()
       e.stopPropagation()
       const done = () => {
-        const prev = copy.textContent
-        copy.textContent = '已复制'
-        setTimeout(() => { copy.textContent = prev ?? '复制' }, 1200)
+        copy.textContent = '✓ 已复制'
+        applyCopyState('done')
+        setTimeout(() => {
+          copy.textContent = '复制'
+          applyCopyState('default')
+        }, 1200)
       }
       const fail = () => {
-        copy.textContent = '复制失败'
-        setTimeout(() => { copy.textContent = '复制' }, 1200)
+        copy.textContent = '✗ 复制失败'
+        applyCopyState('fail')
+        setTimeout(() => {
+          copy.textContent = '复制'
+          applyCopyState('default')
+        }, 1200)
       }
       if (navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(link.url).then(done, () => {
@@ -173,12 +243,15 @@ function buildExternalLinksPanel(links: ExternalLink[]): HTMLElement {
           ta.style.opacity = '0'
           document.body.appendChild(ta)
           ta.select()
-          try { document.execCommand('copy') ? done() : fail() }
-          catch { fail() }
-          finally { ta.remove() }
+          try {
+            document.execCommand('copy') ? done() : fail()
+          } catch {
+            fail()
+          } finally {
+            ta.remove()
+          }
         })
-      }
-      else {
+      } else {
         fail()
       }
     })
@@ -230,7 +303,12 @@ function mountExternalLinksPanel(opPost: HTMLElement): void {
   host.style.cssText = 'display: block; max-width: 100% !important;'
 
   const shadow = host.attachShadow({ mode: 'open' })
+  // 主题：themed style 写在最前面，让面板内容继承变量
+  shadow.appendChild(buildThemedStyle())
   shadow.appendChild(buildExternalLinksPanel(links))
+
+  markThemedHost(host)
+  void applyPanelTheme(host)
 
   td.appendChild(host)
   tr.appendChild(td)
@@ -243,7 +321,10 @@ function debounced(fn: () => void, waitMs: number): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
   return () => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => { timer = null; fn() }, waitMs)
+    timer = setTimeout(() => {
+      timer = null
+      fn()
+    }, waitMs)
   }
 }
 
@@ -278,8 +359,13 @@ export async function enableExternalLinksPanel(): Promise<void> {
     mountExternalLinksPanel(opPost)
   }, 800)
 
-  const observer = new MutationObserver((records) => {
-    if (records.some(r => (r.target as HTMLElement | null)?.closest?.('tr[data-external-links-row="1"]'))) return
+  const observer = new MutationObserver(records => {
+    if (
+      records.some(r =>
+        (r.target as HTMLElement | null)?.closest?.('tr[data-external-links-row="1"]'),
+      )
+    )
+      return
     scheduleRemount()
   })
   observer.observe(document.body, { childList: true, subtree: true })

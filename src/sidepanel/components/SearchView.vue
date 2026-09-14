@@ -193,21 +193,23 @@ function openInTab(url: string) {
 .search-input {
   flex: 1;
   padding: 6px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--crx-border-strong);
   border-radius: 6px;
   font-size: 13px;
+  color: var(--crx-text);
+  background: var(--crx-input-bg);
 }
 
 .search-input:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  border-color: var(--crx-primary);
+  box-shadow: 0 0 0 2px var(--crx-focus-ring);
 }
 
 .search-submit {
   padding: 6px 14px;
-  background: #3b82f6;
-  color: #fff;
+  background: var(--crx-primary);
+  color: var(--crx-on-primary);
   border: none;
   border-radius: 6px;
   font-size: 13px;
@@ -215,11 +217,11 @@ function openInTab(url: string) {
 }
 
 .search-submit:hover:not(:disabled) {
-  background: #2563eb;
+  background: var(--crx-primary-hover);
 }
 
 .search-submit:disabled {
-  background: #9ca3af;
+  background: var(--crx-disabled-fg);
   cursor: not-allowed;
 }
 </style>

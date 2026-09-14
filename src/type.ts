@@ -89,3 +89,24 @@ export interface ImageTask {
 }
 
 export type LinkFormat = 'url' | 'markdown' | 'html' | 'bbcode'
+
+/** whatslink.info 查询返回的磁链元数据 */
+export interface WhatslinkInfo {
+  found: boolean
+  name: string
+  size: number
+  fileType: string
+  count: number
+  screenshots: string[]
+  cachedAt: number
+}
+
+/** 结果行二级"预览"面板状态 */
+export type PreviewState = 'idle' | 'loading' | 'done' | 'error'
+
+/** 论坛页当前生效主题。'auto' 由 content script 在论坛页 context 内解析成 'dark' / 'light'，
+ * sidepanel 只看终值。'unknown' 表示论坛未连接 / 未探测到（落回 light）。 */
+export type ForumTheme = 'dark' | 'light' | 'unknown'
+
+/** sidepanel 最终生效主题。 */
+export type EffectiveTheme = 'dark' | 'light'

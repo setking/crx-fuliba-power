@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { ENABLED_SITES, MESSAGE_TYPES } from '@/global'
-import type { LoginStatus } from '@/type'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { BJX_AUTO_PREVIEW_KEY, ENABLED_SITES, MESSAGE_TYPES } from '@/global'
+import type { ForumTheme, LoginStatus } from '@/type'
 import { isEnabledSite } from '@/utils/sites'
+import { FORUM_THEME_KEY } from '@/utils/theme'
 
 type Status = 'loading' | 'enabled' | 'disabled'
 
@@ -14,7 +15,16 @@ const checkinMsg = ref<string>('')
 const autoCheckinEnabled = ref(true)
 const lastCheckinDate = ref<string>('')
 
+const autoPreviewEnabled = ref(true)
+
 const loginStatus = ref<LoginStatus>('unknown')
+
+const forumTheme = ref<ForumTheme>('unknown')
+
+const forumThemeText = computed(() => {
+  if (forumTheme.value === 'unknown') return '论坛未连接'
+  return `论坛主题：${forumTheme.value === 'dark' ? '暗色' : '亮色'}`
+})
 
 async function probeLoginStatus() {
   if (activeTabId.value == null) {
@@ -29,6 +39,18 @@ async function probeLoginStatus() {
   catch {
     loginStatus.value = 'unknown'
   }
+}
+
+function readThemeFromStorage(stored: Record<string, unknown>) {
+  const raw = stored[FORUM_THEME_KEY]
+  if (raw === 'dark' || raw === 'light') forumTheme.value = raw
+}
+
+function handleStorageChange(changes: Record<string, chrome.storage.StorageChange>, area: string) {
+  if (area !== 'local') return
+  if (!changes[FORUM_THEME_KEY]) return
+  const next = changes[FORUM_THEME_KEY].newValue
+  forumTheme.value = (next === 'dark' || next === 'light') ? next : 'unknown'
 }
 
 onMounted(async () => {
@@ -59,18 +81,31 @@ onMounted(async () => {
     status.value = 'disabled'
   }
 
-  // 读取自动签到开关 & 上次签到日期
-  const stored = await chrome.storage.local.get(['autoCheckinEnabled', 'lastCheckin'])
+  // 读取自动签到开关 & 上次签到日期 & 主题
+  const stored = await chrome.storage.local.get(['autoCheckinEnabled', 'lastCheckin', BJX_AUTO_PREVIEW_KEY, FORUM_THEME_KEY])
   if (stored.autoCheckinEnabled === false) autoCheckinEnabled.value = false
+  if (stored[BJX_AUTO_PREVIEW_KEY] === false) autoPreviewEnabled.value = false
   const last = stored.lastCheckin as { host: string; date: string } | undefined
   if (last?.host === currentHost.value) {
     lastCheckinDate.value = last.date
   }
+  readThemeFromStorage(stored as Record<string, unknown>)
+
+  chrome.storage.onChanged.addListener(handleStorageChange)
+})
+
+onUnmounted(() => {
+  chrome.storage.onChanged.removeListener(handleStorageChange)
 })
 
 async function toggleAutoCheckin() {
   autoCheckinEnabled.value = !autoCheckinEnabled.value
   await chrome.storage.local.set({ autoCheckinEnabled: autoCheckinEnabled.value })
+}
+
+async function toggleAutoPreview() {
+  autoPreviewEnabled.value = !autoPreviewEnabled.value
+  await chrome.storage.local.set({ [BJX_AUTO_PREVIEW_KEY]: autoPreviewEnabled.value })
 }
 
 async function triggerCheckin() {
@@ -86,27 +121,6 @@ async function triggerCheckin() {
     checkinMsg.value = `发送失败：${(err as Error).message}`
   }
 }
-
-// async function openSidePanel() {
-//   try {
-//     const [tab] = await chrome.tabs.query({
-//       active: true,
-//       currentWindow: true,
-//     })
-
-//     if (tab?.id == null) {
-//       throw new Error('无法获取当前 Tab')
-//     }
-
-//     await chrome.sidePanel.open({
-//       tabId: tab.id,
-//     })
-
-//     window.close()
-//   } catch (err) {
-//     checkinMsg.value = `打开侧边栏失败：${(err as Error).message}`
-//   }
-// }
 </script>
 
 <template>
@@ -142,12 +156,23 @@ async function triggerCheckin() {
         </span>
       </div>
 
+      <div class="checkin-row">
+        <label class="switch">
+          <input type="checkbox" :checked="autoPreviewEnabled" @change="toggleAutoPreview">
+          <span>磁链自动预览</span>
+        </label>
+      </div>
+      <p class="hint-text">
+        开启后，磁链结果行进入视口时后台预热缓存，点击预览秒出（不影响阅读体验）
+      </p>
+
+      <div class="theme-status">
+        <span class="theme-status-main">{{ forumThemeText }}</span>
+      </div>
+
       <button class="checkin-btn" :disabled="!!lastCheckinDate" @click="triggerCheckin">
         🎯 立即签到
       </button>
-      <!-- <button class="sidepanel-btn" @click="openSidePanel">
-        📂 打开侧边栏
-      </button> -->
       <p v-if="checkinMsg" class="checkin-msg">
         {{ checkinMsg }}
       </p>
@@ -331,25 +356,34 @@ async function triggerCheckin() {
   cursor: not-allowed;
 }
 
-.sidepanel-btn {
-  margin-top: 0.4rem;
-  padding: 0.4rem 1rem;
-  font-size: 0.85rem;
-  color: #1f2937;
-  background: white;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 150ms;
+.theme-status {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 0.35rem;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  background: #f3f4f6;
+  color: #374151;
+  border-radius: 6px;
 }
 
-.sidepanel-btn:hover {
-  background: #f3f4f6;
+.theme-status-main {
+  font-weight: 600;
 }
 
 .checkin-msg {
   margin: 0.25rem 0 0;
   font-size: 0.8rem;
   color: #4b5563;
+}
+
+.hint-text {
+  margin: -0.25rem 0 0;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  line-height: 1.4;
 }
 </style>

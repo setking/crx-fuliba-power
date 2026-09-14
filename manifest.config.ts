@@ -29,6 +29,6 @@ export default defineManifest({
   background: {
     service_worker: 'src/background.ts',
   },
-  permissions: ['sidePanel', 'contentSettings', 'tabs', 'storage'],
+  permissions: ['sidePanel', 'contentSettings', 'tabs', 'storage', 'alarms'],
   host_permissions: ['<all_urls>'],
 })

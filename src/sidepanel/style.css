@@ -1,14 +1,141 @@
+/**
+/* CSS 变量定义：light 默认，:root[data-theme="dark"] 覆盖。
+ * 命名沿用 --crx-* 前缀便于在 Vue 子组件 <style scoped> 中引用。
+ * 颜色语义对齐 CLAUDE.md §5（成功 / 警示 / 错误 / 主色 / 签到）。
+ * 见 §6.7：sidepanel 改 <html data-theme> 切换，与论坛页 <html data-dztheme> 互不污染。 */
 :root {
+  /* surface */
+  --crx-bg: #f9fafb;
+  --crx-surface: #ffffff;
+  --crx-surface-alt: #f3f4f6;
+  --crx-surface-hover: #e5e7eb;
+
+  /* text */
+  --crx-text: #1f2937;
+  --crx-text-muted: #6b7280;
+  --crx-text-subtle: #9ca3af;
+
+  /* border / divider */
+  --crx-border: #e5e7eb;
+  --crx-border-strong: #d1d5db;
+
+  /* brand / primary */
+  --crx-primary: #3b82f6;
+  --crx-primary-hover: #2563eb;
+  --crx-primary-soft: #eff6ff;
+  --crx-primary-soft-border: #bfdbfe;
+  --crx-primary-strong: #1e40af;
+  --crx-on-primary: #ffffff;
+
+  /* success (logged in / done) */
+  --crx-success-bg: #d1fae5;
+  --crx-success-fg: #065f46;
+  --crx-success-border: #a7f3d0;
+
+  /* danger (logged out) */
+  --crx-danger-bg: #fee2e2;
+  --crx-danger-fg: #991b1b;
+  --crx-danger-border: #fecaca;
+  --crx-danger-strong: #b91c1c;
+
+  /* warning (error banner) */
+  --crx-warning-bg: #fef3c7;
+  --crx-warning-fg: #92400e;
+  --crx-warning-border: #fde68a;
+
+  /* checkin (signature green) */
+  --crx-checkin: #10b981;
+  --crx-checkin-hover: #059669;
+
+  /* input */
+  --crx-input-bg: #ffffff;
+  --crx-input-border: #d1d5db;
+  --crx-focus-ring: rgba(59, 130, 246, 0.15);
+  --crx-disabled-bg: #f3f4f6;
+  --crx-disabled-fg: #9ca3af;
+
+  /* shadow */
+  --crx-shadow: rgba(0, 0, 0, 0.05);
+  --crx-overlay: rgba(0, 0, 0, 0.05);
+  --crx-primary-ring: rgba(37, 99, 235, 0.25);
+
+  /* status accent (图床状态点 / 卡片描边) */
+  --crx-success-edge: #86efac;
+  --crx-danger-edge: #fca5a5;
+
+  /* dashed border (dropzone) */
+  --crx-dashed: #cbd5e1;
+
+  /* text on muted surface */
+  --crx-text-on-soft: #1e40af;
+
+  color-scheme: light;
+
   font-family: ui-sans-serif, system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #1f2937;
-  background: #f9fafb;
-  color-scheme: light;
+  color: var(--crx-text);
+  background: var(--crx-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme="dark"] {
+  --crx-bg: #111827;
+  --crx-surface: #1f2937;
+  --crx-surface-alt: #374151;
+  --crx-surface-hover: #4b5563;
+
+  --crx-text: #f3f4f6;
+  --crx-text-muted: #d1d5db;
+  --crx-text-subtle: #9ca3af;
+
+  --crx-border: #374151;
+  --crx-border-strong: #4b5563;
+
+  --crx-primary: #60a5fa;
+  --crx-primary-hover: #93c5fd;
+  --crx-primary-soft: #1e3a8a;
+  --crx-primary-soft-border: #2563eb;
+  --crx-primary-strong: #93c5fd;
+  --crx-on-primary: #0b1220;
+
+  --crx-success-bg: #064e3b;
+  --crx-success-fg: #6ee7b7;
+  --crx-success-border: #047857;
+
+  --crx-danger-bg: #7f1d1d;
+  --crx-danger-fg: #fecaca;
+  --crx-danger-border: #b91c1c;
+  --crx-danger-strong: #fca5a5;
+
+  --crx-warning-bg: #78350f;
+  --crx-warning-fg: #fde68a;
+  --crx-warning-border: #b45309;
+
+  --crx-checkin: #34d399;
+  --crx-checkin-hover: #6ee7b7;
+
+  --crx-input-bg: #374151;
+  --crx-input-border: #4b5563;
+  --crx-focus-ring: rgba(96, 165, 250, 0.35);
+  --crx-disabled-bg: #374151;
+  --crx-disabled-fg: #9ca3af;
+
+  --crx-shadow: rgba(0, 0, 0, 0.4);
+  --crx-overlay: rgba(0, 0, 0, 0.5);
+  --crx-primary-ring: rgba(96, 165, 250, 0.35);
+
+  --crx-success-edge: #047857;
+  --crx-danger-edge: #b91c1c;
+
+  --crx-dashed: #4b5563;
+
+  --crx-text-on-soft: #93c5fd;
+
+  color-scheme: dark;
 }
 
 *,
@@ -29,6 +156,8 @@ body,
 body {
   min-height: 100vh;
   overflow-x: hidden;
+  background: var(--crx-bg);
+  color: var(--crx-text);
 }
 
 button {

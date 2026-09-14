@@ -13,16 +13,23 @@ import { isLoggedIn } from '@/utils/auth'
 import { fetchForumSearch, fetchMyCounts, fetchMyFavorites, fetchMyFriends, fetchMyThreads, getCurrentUid } from '@/utils/forum-api'
 import { dataUrlToBlob, uploadImage } from '@/utils/image-host'
 import { isArticlePage, isViewthreadPage } from '@/utils/hidden-links'
-import { UPLOAD_HOST, isFloatButtonSite } from '@/utils/sites'
+import { isEnabledSite, UPLOAD_HOST, isFloatButtonSite } from '@/utils/sites'
 import { enableBjxTransform } from '@/content/bjx'
 import { autoCheckin, triggerCheckin } from '@/content/checkin'
 import { enableExternalLinksPanel } from '@/content/external-links'
 import { mountFloatButton } from '@/content/float-button'
-
+import { enableForumThemeWatcher } from '@/content/theme-watcher'
 console.log('[CRXJS] content script loaded')
 
 // ============ popup / sidepanel → content 消息 ============
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === 'PING') {
+    // background 用 ping 探测 content 是否就绪 —— 必须显式 sendResponse，否则
+    // sender 端会一直 pending（MV3 chrome.tabs.sendMessage 无内置超时），下一轮
+    // ping 又因旧 channel 未关而 "Receiving end does not exist"
+    sendResponse({ pong: true })
+    return
+  }
   if (msg?.type === MESSAGE_TYPES.CHECKIN) {
     sendResponse(triggerCheckin())
   } else if (msg?.type === MESSAGE_TYPES.PROBE_LOGIN) {
@@ -117,27 +124,37 @@ if (isFloatButtonSite(location.hostname)) {
   void mountFloatButton()
 }
 
-/** 自动签到：等 DOM 完整后再启动 */
-if (document.readyState === 'complete') {
-  void autoCheckin()
+/** 自动签到：DOMContentLoaded 即启动（不阻塞在图片/iframe 加载）。
+ * readyState='loading' 还在解析文档；其它状态（interactive / complete）直接跑。 */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { void autoCheckin() })
 } else {
-  window.addEventListener('load', () => { void autoCheckin() })
+  void autoCheckin()
 }
 
 /** 外站链接面板：仅 viewthread 详情页 */
 if (isViewthreadPage()) {
-  if (document.readyState === 'complete') {
-    void enableExternalLinksPanel()
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void enableExternalLinksPanel() })
   } else {
-    window.addEventListener('load', () => { void enableExternalLinksPanel() })
+    void enableExternalLinksPanel()
   }
 }
 
 /** 百家姓 / 油管 转换：viewthread 详情页 + WordPress 文章页 */
 if (isArticlePage()) {
-  if (document.readyState === 'complete') {
-    void enableBjxTransform()
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void enableBjxTransform() })
   } else {
-    window.addEventListener('load', () => { void enableBjxTransform() })
+    void enableBjxTransform()
+  }
+}
+
+/** 论坛主题探测：所有白名单站点都启动，让 sidepanel 始终能读到当前主题 */
+if (isEnabledSite(location.hostname)) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void enableForumThemeWatcher() })
+  } else {
+    void enableForumThemeWatcher()
   }
 }

@@ -15,6 +15,11 @@ export const BJX_RESULT_CLASS = 'crxjs-bjx-result'
 /** 已被转换过的元素标记，避免 MutationObserver 重入 */
 export const BJX_PROCESSED_ATTR = 'data-crxjs-bjx-done'
 
+/** 百家姓 / magnet 结果行的"自动预览"开关 key。
+ * 开启后：magnet 结果行进入视口即后台预热 whatslink 缓存（不自动展开 UI），用户点预览按钮时秒出。
+ * 关闭后：保持原行为，必须点击才 fetch。 */
+export const BJX_AUTO_PREVIEW_KEY = 'bjxAutoPreview'
+
 export const DEFAULT_PAGE_SIZE = 20
 
 export const IMAGE_UPLOAD_URL = 'https://tu.wnflb2023.com/application/upload.php'

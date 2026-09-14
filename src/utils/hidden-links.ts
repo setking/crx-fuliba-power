@@ -283,8 +283,9 @@ export function isArticlePage(url: string = location.href): boolean {
       || path.startsWith('/wp-')
       || path.startsWith('/feed')
     ) return false
-    // WordPress 文章页：/{slug}.html 或 /{slug}/ 或 /{slug}
+    // WordPress 文章页：/{slug}.html 或 /{slug}/ 或 /{slug}；含分页 /{slug}.html/{n} 也算
     if (path.endsWith('.html') || path.endsWith('/')) return true
+    if (/^\/[^\/]+\.html\/\d+\/?$/.test(path)) return true
     return false
   }
   catch {

@@ -13,6 +13,9 @@ release
 dist-ssr
 *.local
 
+# TypeScript incremental build cache (每次编译都会变，不入版本控制)
+tsconfig.tsbuildinfo
+
 # Editor directories and files
 .vscode/*
 docs
