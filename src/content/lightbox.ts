@@ -157,27 +157,39 @@ function isSvgUrl(src: string): boolean {
   return /\.svg(\.|$)/i.test(noFrag) || /^data:image\/svg\+xml/i.test(noFrag.trim())
 }
 
-/** 判断 src 是否为 Discuz 表情包（`static/image/smiley` 目录下都是论坛表情图标）。
- * 匹配 `data-original` / `data-zoomfile` / `src` 任一字段里出现路径关键字即视为表情包。
- * 大小写不敏感，避免不同论坛镜像站点路径差异。 */
-function isSmileyImage(src: string): boolean {
+/** 判断 src 是否为 Discuz 论坛自带的 UI 元素（不是用户内容图片）。
+ * Discuz 自 7.x 起将论坛内置 UI 图标统一放在 `static/image/` 下，常见子目录：
+ *  - static/image/smiley    表情包
+ *  - static/image/common    公共图标（在线 / 离线 / 等级 / 勋章 / 版块图标等）
+ *  - static/image/filetype  附件类型图标（zip / rar / pdf 等 16×16）
+ *  - static/image/magic     道具图标
+ *  - static/image/admincp   后台管理图标（前台一般不会显示，兜底）
+ * 这些都属于论坛模板自带 UI 元素，不是用户上传的内容图片，正文里夹杂它们对 lightbox 无意义。
+ *
+ * 匹配 `currentSrc` / `data-original` / `data-zoomfile` / `data-src` /
+ * `data-lazy-src` / `file` / `src` 任一字段里出现上述子串即视为论坛 UI 图。
+ * 大小写不敏感，避免不同论坛镜像站点路径差异。
+ *
+ * 用户上传的附件路径（`data/attachment/...` / `forum.php?mod=attachment` /
+ * 图床 CDN 等）完全不命中，不会被误伤。 */
+function isForumStaticIcon(src: string): boolean {
   if (!src) return false
-  return /static\/image\/smiley/i.test(src)
+  return /static\/image\/(smiley|common|filetype|magic|admincp)/i.test(src)
 }
 
 /** 从 img 元素抽 src，按优先级尝试多个属性；同时把任意候选项里包含 `smiley` 路径的表情包过滤掉 */
 function readImageSrc(img: HTMLImageElement): string {
   // 1. currentSrc —— 论坛 lazy-load 后真实加载的 src（Discuz 附件链走这里）
-  if (img.currentSrc && !isSmileyImage(img.currentSrc)) return img.currentSrc
+  if (img.currentSrc && !isForumStaticIcon(img.currentSrc)) return img.currentSrc
   // 2. data-* 常见的 lazy-load 提示属性
   const dataAttrs = ['data-original', 'data-zoomfile', 'data-src', 'data-lazy-src', 'file']
   for (const attr of dataAttrs) {
     const v = img.getAttribute(attr)
-    if (v && v.trim() && !isSmileyImage(v)) return v
+    if (v && v.trim() && !isForumStaticIcon(v)) return v
   }
   // 3. fallback 到原生 src —— 表情包场景论坛常用 `<img src="static/image/smiley/...">`
   const fallback = img.getAttribute('src') ?? ''
-  return isSmileyImage(fallback) ? '' : fallback
+  return isForumStaticIcon(fallback) ? '' : fallback
 }
 
 /** 从 <video> 抽 src + poster。优先取 source 元素 */
@@ -221,7 +233,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
-    if (isSmileyImage(raw)) continue
+    if (isForumStaticIcon(raw)) continue
     const normalized = raw.split('#')[0] ?? raw
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
@@ -277,7 +289,7 @@ function mediaToLightboxImage(el: Element): LightboxImage | null {
     const src = readImageSrc(el)
     if (!src) return null
     if (isSvgUrl(src)) return null
-    if (isSmileyImage(src)) return null
+    if (isForumStaticIcon(src)) return null
     return { kind: 'image', src: src.split('#')[0] ?? src }
   }
   if (el instanceof HTMLVideoElement) {
@@ -320,7 +332,7 @@ function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
-    if (isSmileyImage(raw)) continue
+    if (isForumStaticIcon(raw)) continue
     const normalized = raw.split('#')[0] ?? raw
     if (!normalized) continue
     const item: LightboxImage = { kind: 'image', src: normalized }
@@ -396,7 +408,7 @@ function ensureRootObserver(root: HTMLElement): void {
             if (node instanceof HTMLImageElement && !node.complete) {
               node.addEventListener('load', () => {
                 const realSrc = readImageSrc(node)
-                if (!realSrc || isSvgUrl(realSrc) || isSmileyImage(realSrc)) return
+                if (!realSrc || isSvgUrl(realSrc) || isForumStaticIcon(realSrc)) return
                 const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
                 if (!hasInList(list, realItem)) {
                   list.push(realItem)
@@ -421,7 +433,7 @@ function ensureRootObserver(root: HTMLElement): void {
           if (child instanceof HTMLImageElement && !child.complete) {
             child.addEventListener('load', () => {
               const realSrc = readImageSrc(child)
-              if (!realSrc || isSvgUrl(realSrc) || isSmileyImage(realSrc)) return
+              if (!realSrc || isSvgUrl(realSrc) || isForumStaticIcon(realSrc)) return
               const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
               if (!hasInList(list, realItem)) {
                 list.push(realItem)
@@ -442,7 +454,7 @@ function ensureRootObserver(root: HTMLElement): void {
         // 但 src 变了意味着可能是另一张图，去重靠 hasInList
         seen.add(img)
         const realSrc = readImageSrc(img)
-        if (realSrc && !isSvgUrl(realSrc) && !isSmileyImage(realSrc)) {
+        if (realSrc && !isSvgUrl(realSrc) && !isForumStaticIcon(realSrc)) {
           const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
           // 若原占位未入库、现在解析到真实 src → 入库
           if (!hasInList(list, realItem)) {
@@ -489,7 +501,7 @@ function findClickableMedia(target: Element): { root: HTMLElement; item: Lightbo
   if (media instanceof HTMLImageElement) {
     const clickedSrc = readImageSrc(media).split('#')[0] ?? ''
     // 表情包防御：readImageSrc 已过滤，此处二次确认（防 observer/sync 阶段 list 包含表情包）
-    if (isSmileyImage(clickedSrc)) return null
+    if (isForumStaticIcon(clickedSrc)) return null
     index = images.findIndex(i => i.kind === 'image' && i.src === clickedSrc)
     item = images[index]
   }
@@ -1247,7 +1259,7 @@ function onDocClick(e: MouseEvent): void {
   // SVG / 表情包 / 外站 <a> 包裹：不能进 lightbox，也不能吞事件 —— 让浏览器原生行为照旧
   if (media instanceof HTMLImageElement) {
     const src = readImageSrc(media)
-    if (isSvgUrl(src) || isSmileyImage(src)) return
+    if (isSvgUrl(src) || isForumStaticIcon(src)) return
   }
   if (isWrappedInExternalLink(media)) return
   // 是正文里的可劫持媒体：阻止冒泡到外层 <a> 触发跳转

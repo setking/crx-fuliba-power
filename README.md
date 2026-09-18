@@ -13,7 +13,7 @@ Chrome MV3 扩展，针对两个 Discuz! 论坛站提供自动化与辅助功能
 | 浮动按钮                   | content script（仅 `wnflb2023.com`）                 | 右下角挂一个可拖拽按钮，点击打开 Side Panel；位置持久化到 `chrome.storage.local`                                                                                                              |
 | 外站链接面板               | content script（viewthread 详情页）                  | 扫描帖子正文的 `<a href>`，过滤论坛内部跳转后以外站链接面板形式插入到楼主正文段之后；面板含域名 / URL / 复制按钮（高对比主色 + hover/active 反馈）；所有样式走 Shadow DOM 隔离论坛 CSS，并跟随论坛 light/dark 主题（panel-theme.ts 色板）                                          |
 | 百家姓 / 油管转换          | content script（详情页 + WordPress 文章页 + 评论区） | 自动识别帖子正文 / 评论里的百家姓代码（连续字典字符）→ 转 `magnet:?xt=urn:btih:...` 链接（自动预览 whatslink 磁链元数据：标题 / 大小 / 文件列表）；`watch?v=XXX` → YouTube 链接；`油管/channelXXX` h4 → 频道链接；白字隐藏 `<a>` → "好孩子看不见" 提示 |
-| 图片灯箱（Lightbox）       | content script（详情页 / 文章页正文）                | 点击正文 `<img>` / `<video>` / `<iframe>` / `<embed>` 弹出 ShadowRoot 模态大图；滚轮缩放 + 工具栏 ±/↺/⟲/↻ + 双击 100% 切换 + 拖拽 + 键盘翻页；懒加载新图实时追加进轮播；过滤隐藏 DOM + 外站 `<a>` 包裹 + 表情包（`static/image/smiley`）；SVG 不劫持；视频时底部工具栏 z-index 下沉 + 背景透明，不遮挡播放控件 |
+| 图片灯箱（Lightbox）       | content script（详情页 / 文章页正文）                | 点击正文 `<img>` / `<video>` / `<iframe>` / `<embed>` 弹出 ShadowRoot 模态大图；滚轮缩放 + 工具栏 ±/↺/⟲/↻ + 双击 100% 切换 + 拖拽 + 键盘翻页；懒加载新图实时追加进轮播；过滤隐藏 DOM + 外站 `<a>` 包裹 + Discuz 静态 UI 图标（`static/image/smiley\|common\|filetype\|magic\|admincp`）；SVG 不劫持；视频时底部工具栏 z-index 下沉 + 背景透明，不遮挡播放控件 |
 | 我的（帖子 / 收藏 / 好友） | Side Panel                                           | 通过 `home.php?mod=space` 抓取并复用登录 cookie，展示我的帖子 / 收藏 / 好友列表 + 分页 + 数量 badge                                                                                           |
 | 搜索                       | Side Panel                                           | Discuz `search.php?mod=forum` 关键词搜索；首响提取动态 `searchid`，后续分页复用                                                                                                               |
 | 图床                       | Side Panel                                           | 多图批量上传到 `tu.wnflb2023.com/application/upload.php`，并发 3，4 种链接格式（URL / Markdown / HTML / BBCode），最近 50 张历史                                                              |
@@ -59,7 +59,7 @@ fuliba/
     │   ├── float-button.ts     # 浮动按钮（拖拽 + 持久化位置）
     │   ├── external-links.ts   # 外站链接面板
     │   ├── bjx.ts              # 百家姓 / 油管 / 白字转换
-    │   ├── lightbox.ts         # 图片灯箱：缩放 / 旋转 / 重置 / 视频 / 懒加载追加 / 隐藏 DOM 过滤 / 外站 <a> 包裹过滤 / 表情包过滤
+    │   ├── lightbox.ts         # 图片灯箱：缩放 / 旋转 / 重置 / 视频 / 懒加载追加 / 隐藏 DOM 过滤 / 外站 <a> 包裹过滤 / Discuz 静态 UI 图标过滤
     │   └── theme-watcher.ts     # 论坛主题（深 / 浅）跟随
     └── assets/                 # 内联 SVG 图标（lightbox 工具栏 / Side Panel）
         ├── magnify.svg         # 放大
@@ -161,15 +161,21 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 - 应用于 4 个入口：`collectImagesFromRoot` 4 个 querySelectorAll 循环 / `mediaToLightboxImage` / `syncNewlyVisible` / `findClickableMedia`
 - **点击行为**：外站 `<a>` 包裹的图片点不到 lightbox，也**不劫持点击**（`onDocClick` 在 preventDefault 前先走 `isWrappedInExternalLink`；不命中即 return，浏览器原生 `<a>.href` 跳转照旧）
 
-### 表情包过滤
+### Discuz 静态 UI 图标过滤
 
-- 论坛表情包路径固定在 `static/image/smiley`（Discuz 默认约定，emotion 子目录等同样命中）
-- `isSmileyImage(src)` 检测 src / currentSrc / `data-original` / `data-zoomfile` / `data-src` / `data-lazy-src` / `file` 任一字段包含 `static/image/smiley` 子串
-- `readImageSrc` 在 attribute 读取阶段就把候选项过滤掉 —— 不再返回带 smiley 路径的 src（返回空串）
-- `mediaToLightboxImage` / `collectImagesFromRoot` / `syncNewlyVisible` / observer 的 `load` 回调 / `attributes` 回调均二次校验，避免 lazy-load 后续把占位换成表情图时漏过
-- 只对 `<img>` 生效；`<video>` / `<iframe>` / `<embed>` 不会出现表情包
-- **点击行为**：表情包图片不进 lightbox，但**也不会被劫持**（`onDocClick` 在 preventDefault 前先检查；不命中即 return，让浏览器原生行为照旧 —— 论坛脚本弹层 / 复制 / 其它预览仍有效）
-- 点击事件层面：`<a>` 包裹的媒体 `findClickableMedia` 返回 null → 原生 `<a>.href` 自然触发跳转，浏览器「新标签页打开外站」行为保留
+Discuz 自 7.x 起将论坛内置 UI 图标统一放在 `static/image/` 下，统一剔除（都是论坛模板自带 UI，不是用户上传内容）：
+- `static/image/smiley` 表情包
+- `static/image/common` 公共图标（在线 / 离线 / 等级 / 勋章 / 版块图标等）
+- `static/image/filetype` 附件类型图标（zip / rar / pdf 等 16×16）
+- `static/image/magic` 道具图标
+- `static/image/admincp` 后台管理图标（前台一般不会显示，兜底）
+
+- `isForumStaticIcon(src)` 检测 src / currentSrc / `data-original` / `data-zoomfile` / `data-src` / `data-lazy-src` / `file` 任一字段命中上述子目录
+- `readImageSrc` 在 attribute 读取阶段就把候选项过滤掉 —— 不再返回命中 `static/image/<ui-dir>/` 的 src（返回空串）
+- `mediaToLightboxImage` / `collectImagesFromRoot` / `syncNewlyVisible` / observer 的 `load` 回调 / `attributes` 回调 / `findClickableMedia` 均二次校验，避免 lazy-load 后续把占位换成 UI 图时漏过
+- 只对 `<img>` 生效；`<video>` / `<iframe>` / `<embed>` 不会出现这类图标
+- **点击行为**：UI 图标图片不进 lightbox，但**也不会被劫持**（`onDocClick` 在 preventDefault 前先检查；不命中即 return，让浏览器原生行为照旧 —— 论坛脚本弹层 / 复制 / 其它预览仍有效）
+- 用户上传的附件路径（`data/attachment/...` / `forum.php?mod=attachment` / 图床 CDN 等）完全不命中 `static/image/<ui-dir>/`，不会被误伤
 
 ### 性能 / 视觉细节
 
