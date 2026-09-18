@@ -116,6 +116,35 @@ function isElementVisible(el: Element): boolean {
   return true
 }
 
+/** 检查媒体是否被 `<a>` 包裹指向外站（伪装外链）。
+ * 论坛场景：`<a href="https://外站.com/xxx"><img src="..."></a>` —— 图片被外链包裹，
+ * 用户点图本意是开新标签去外站，应放行浏览器原生行为；不应当成 lightbox 入口劫持。
+ *
+ * 判定规则：
+ * - 祖先链没有 `<a>` → false（正常处理）
+ * - `<a>` 是 HTMLAnchorElement 但 `href` 为空 / `#` / `javascript:` → false
+ *   （论坛脚本劫持的图片预览链接，例如 attach://、onclick 弹层图，依然应当进 lightbox）
+ * - `<a>.href` 是 `attachment:` / `data:` / 相对路径 / 同 host → false（内站附件 / 内站图，正常处理）
+ * - `<a>.href` 是 http(s) 且 host ≠ location.host → true（外站伪装链接，跳过 lightbox） */
+function isWrappedInExternalLink(el: Element): boolean {
+  const a = el.closest('a')
+  if (!a || !(a instanceof HTMLAnchorElement)) return false
+  const raw = a.getAttribute('href')?.trim() ?? ''
+  // 空 / 锚点 / 脚本伪协议 → 论坛脚本劫持的图片预览链接，正常进 lightbox
+  if (!raw || raw === '#' || /^javascript:/i.test(raw)) return false
+  // data: / mailto: / tel: 等其它非 http 协议 → 不属于「外站伪装」范畴，正常进 lightbox
+  let url: URL
+  try {
+    url = new URL(raw, location.href)
+  }
+  catch {
+    // href 解析失败（格式异常）→ 保守当作外链？不，按论坛常见坏写法不当外链，跳过 lightbox
+    return false
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  return url.host !== location.host
+}
+
 /** 检查元素是否在白名单正文容器内（避免劫持论坛头像 / 表情 / 侧栏图） */
 function isInsideArticleRoot(el: Element): HTMLElement | null {
   return el.closest<HTMLElement>(ARTICLE_ROOT_SELECTOR)
@@ -179,6 +208,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   // 1. <img>
   for (const img of Array.from(root.querySelectorAll<HTMLImageElement>('img'))) {
     if (!isElementVisible(img)) continue
+    if (isWrappedInExternalLink(img)) continue
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
@@ -191,6 +221,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   // 2. <video>
   for (const v of Array.from(root.querySelectorAll<HTMLVideoElement>('video'))) {
     if (!isElementVisible(v)) continue
+    if (isWrappedInExternalLink(v)) continue
     const { src, poster } = readVideoMedia(v)
     if (!src) continue
     const key = src.split('#')[0] ?? src
@@ -202,6 +233,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   // 3. <iframe> / <embed>：B站 / YouTube / 优酷 / Discuz 视频插件常用
   for (const f of Array.from(root.querySelectorAll<HTMLIFrameElement>('iframe'))) {
     if (!isElementVisible(f)) continue
+    if (isWrappedInExternalLink(f)) continue
     const src = readEmbedSrc(f)
     if (!src) continue
     const normalized = src.split('#')[0] ?? src
@@ -211,6 +243,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   }
   for (const e of Array.from(root.querySelectorAll<HTMLEmbedElement>('embed'))) {
     if (!isElementVisible(e)) continue
+    if (isWrappedInExternalLink(e)) continue
     const src = readEmbedSrc(e)
     if (!src) continue
     const normalized = src.split('#')[0] ?? src
@@ -225,9 +258,11 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   return result
 }
 
-/** 把单个 media 元素转成 LightboxImage；返回 null 表示忽略（SVG / 无 src / 已存在 / 祖先链不可见） */
+/** 把单个 media 元素转成 LightboxImage；返回 null 表示忽略（SVG / 无 src / 已存在 / 祖先链不可见 / 被外站 <a> 包裹） */
 function mediaToLightboxImage(el: Element): LightboxImage | null {
   if (!isElementVisible(el)) return null
+  // 被外站 <a> 包裹的图片：浏览器原生「点图开新标签去外站」应保留，不劫持
+  if (isWrappedInExternalLink(el)) return null
   if (el instanceof HTMLImageElement) {
     const src = readImageSrc(el)
     if (!src) return null
@@ -270,6 +305,7 @@ function appendIfNew(root: HTMLElement, item: LightboxImage): boolean {
 function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
   for (const img of Array.from(root.querySelectorAll<HTMLImageElement>('img'))) {
     if (!isElementVisible(img)) continue
+    if (isWrappedInExternalLink(img)) continue
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
@@ -283,6 +319,7 @@ function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
   }
   for (const v of Array.from(root.querySelectorAll<HTMLVideoElement>('video'))) {
     if (!isElementVisible(v)) continue
+    if (isWrappedInExternalLink(v)) continue
     const { src, poster } = readVideoMedia(v)
     if (!src) continue
     const key = src.split('#')[0] ?? src
@@ -295,6 +332,7 @@ function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
   }
   for (const el of Array.from(root.querySelectorAll<HTMLIFrameElement | HTMLEmbedElement>('iframe, embed'))) {
     if (!isElementVisible(el)) continue
+    if (isWrappedInExternalLink(el)) continue
     const src = readEmbedSrc(el)
     if (!src) continue
     const normalized = src.split('#')[0] ?? src
@@ -426,6 +464,8 @@ function shouldBypassClick(e: MouseEvent): boolean {
 function findClickableMedia(target: Element): { root: HTMLElement; item: LightboxImage; index: number; images: LightboxImage[] } | null {
   const media = target.closest('img, video, iframe, embed')
   if (!media) return null
+  // 被外站 <a> 包裹的媒体：用户点图本意是开新标签去外站，不劫持，原生 <a> 自然触发跳转
+  if (isWrappedInExternalLink(media)) return null
   const root = isInsideArticleRoot(media)
   if (!root) return null
   const images = collectImagesFromRoot(root)
