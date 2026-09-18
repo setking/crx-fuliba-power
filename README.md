@@ -11,8 +11,9 @@ Chrome MV3 扩展，针对两个 Discuz! 论坛站提供自动化与辅助功能
 | -------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 自动签到                   | content script                                       | 检测 Discuz 签到按钮并模拟点击；用 `chrome.storage.local` 记录当日已签到，避免重复弹签到                                                                                                      |
 | 浮动按钮                   | content script（仅 `wnflb2023.com`）                 | 右下角挂一个可拖拽按钮，点击打开 Side Panel；位置持久化到 `chrome.storage.local`                                                                                                              |
-| 外站链接面板               | content script（viewthread 详情页）                  | 扫描帖子正文的 `<a href>`，过滤论坛内部跳转后以外站链接面板形式插入到楼主正文段之后；面板含域名 / URL / 复制按钮，所有样式走 Shadow DOM 隔离论坛 CSS                                          |
-| 百家姓 / 油管转换          | content script（详情页 + WordPress 文章页 + 评论区） | 自动识别帖子正文 / 评论里的百家姓代码（连续字典字符）→ 转 `magnet:?xt=urn:btih:...` 链接；`watch?v=XXX` → YouTube 链接；`油管/channelXXX` h4 → 频道链接；白字隐藏 `<a>` → "好孩子看不见" 提示 |
+| 外站链接面板               | content script（viewthread 详情页）                  | 扫描帖子正文的 `<a href>`，过滤论坛内部跳转后以外站链接面板形式插入到楼主正文段之后；面板含域名 / URL / 复制按钮（高对比主色 + hover/active 反馈）；所有样式走 Shadow DOM 隔离论坛 CSS，并跟随论坛 light/dark 主题（panel-theme.ts 色板）                                          |
+| 百家姓 / 油管转换          | content script（详情页 + WordPress 文章页 + 评论区） | 自动识别帖子正文 / 评论里的百家姓代码（连续字典字符）→ 转 `magnet:?xt=urn:btih:...` 链接（自动预览 whatslink 磁链元数据：标题 / 大小 / 文件列表）；`watch?v=XXX` → YouTube 链接；`油管/channelXXX` h4 → 频道链接；白字隐藏 `<a>` → "好孩子看不见" 提示 |
+| 图片灯箱（Lightbox）       | content script（详情页 / 文章页正文）                | 点击正文 `<img>` / `<video>` / `<iframe>` / `<embed>` 弹出 ShadowRoot 模态大图；滚轮缩放 + 工具栏 ±/↺/⟲/↻ + 双击 100% 切换 + 拖拽 + 键盘翻页；懒加载新图实时追加进轮播；过滤隐藏 DOM；SVG 不劫持；视频时底部工具栏 z-index 下沉 + 背景透明，不遮挡播放控件 |
 | 我的（帖子 / 收藏 / 好友） | Side Panel                                           | 通过 `home.php?mod=space` 抓取并复用登录 cookie，展示我的帖子 / 收藏 / 好友列表 + 分页 + 数量 badge                                                                                           |
 | 搜索                       | Side Panel                                           | Discuz `search.php?mod=forum` 关键词搜索；首响提取动态 `searchid`，后续分页复用                                                                                                               |
 | 图床                       | Side Panel                                           | 多图批量上传到 `tu.wnflb2023.com/application/upload.php`，并发 3，4 种链接格式（URL / Markdown / HTML / BBCode），最近 50 张历史                                                              |
@@ -57,7 +58,16 @@ fuliba/
     │   ├── checkin.ts          # 自动签到 + popup 即时签到
     │   ├── float-button.ts     # 浮动按钮（拖拽 + 持久化位置）
     │   ├── external-links.ts   # 外站链接面板
-    │   └── bjx.ts              # 百家姓 / 油管 / 白字转换
+    │   ├── bjx.ts              # 百家姓 / 油管 / 白字转换
+    │   ├── lightbox.ts         # 图片灯箱：缩放 / 旋转 / 重置 / 视频 / 懒加载追加 / 隐藏 DOM 过滤
+    │   └── theme-watcher.ts     # 论坛主题（深 / 浅）跟随
+    └── assets/                 # 内联 SVG 图标（lightbox 工具栏 / Side Panel）
+        ├── magnify.svg         # 放大
+        ├── shrink.svg          # 缩小
+        ├── reset.svg           # 重置
+        ├── rotate-left.svg     # 逆时针旋转
+        ├── rotate-right.svg    # 顺时针旋转
+        ├── crx.svg / imgs.svg / search.svg / user.svg  # Side Panel 用
     └── utils/                  # 纯函数 / 工具模块（低副作用）
         ├── auth.ts             # 登录态检测（DOM + cookie）
         ├── checkin.ts          # 签到状态读取 / 写入
@@ -67,6 +77,9 @@ fuliba/
         ├── bjx.ts              # 百家姓字典 + 转换
         ├── image-host.ts       # 图床 dataURL ↔ Blob ↔ FormData 转换
         ├── pagination.ts       # 通用分页缓存 / 数量工具
+        ├── panel-theme.ts      # Shadow DOM 面板主题色板（light/dark CSS 变量，跨面板共享）
+        ├── theme.ts            # 论坛页面主题（深/浅）探测 + MutationObserver 跟随
+        ├── whatslink.ts        # 磁链元数据预览 API（whatslink.com 拉取 + chrome.storage 缓存）
         └── extension.ts        # getActiveTab / fetchViaContent 等 UI ↔ content 通用桥
 ```
 
@@ -100,6 +113,50 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 | `UPLOAD_IMAGE`                                                         | side panel → content              | 转发到 `tu.wnflb2023.com` 的 content 发 multipart 上传 |
 | `OPEN_SIDE_PANEL`                                                      | content → background → side panel | 浮动按钮点击时打开 Side Panel                          |
 
+## 图片灯箱（Lightbox）
+
+`src/content/lightbox.ts`（v1.0.4）。在详情页 / 文章页正文里点击媒体元素弹出 ShadowRoot 模态大图，所有样式走 Shadow DOM 隔离论坛 CSS。
+
+### 触发与白名单
+
+- **劫持元素**：`<img>` / `<video>` / `<iframe>` / `<embed>` 四类媒体；SVG（`*.svg` / `data:image/svg+xml`）直接跳过
+- **正文根节点**：`article.article-content` / `.article-content`（WordPress）+ `td.t_f[id^="postline_"]` / `.pattl` / `.pcb` / `.message`（Discuz 楼层 + `<ignore_js_op>` 附件容器）
+- **劫持手势**：默认左键单击；`Ctrl` / `Cmd` / `Shift` + 左键、中键、右键放行（用户期望的「新标签页打开图片」原生行为）
+- **关闭**：点击遮罩 / 右上角 × / `Esc` 键；关闭后销毁 modal 节点与所有监听器
+
+### 缩放 / 旋转 / 重置
+
+- **缩放**：滚轮（自适应步长 0.05~0.2）+ 工具栏缩小 / 放大按钮（×0.8 / ×1.25）；范围 `[0.1, 8]`
+- **旋转**：左右旋转按钮，每次 ±90°（0/90/180/270 步进）
+- **重置**：恢复原始尺寸按钮一次性归零 scale / rotation / offset
+- **双击**：在「适应屏」与「100% 自然尺寸」之间切换（el-image 风格，图片可溢出 wrap 边界）
+- **拖拽**：mousedown 锁定当前 offset 基线后累加偏移，避免连续拖放 / 双击导致的偏移复位
+- **键盘**：`←` / `→` / `Home` / `End` 翻页；切图保留 scale / rotation
+
+### 视频 / 嵌入
+
+- `<video>` 用原生 `<video controls>` 播放；`<iframe>` / `<embed>`（B 站 / YouTube / Discuz 视频插件）保留原 src
+- **视频 / 嵌入时底部变换工具栏自动隐藏**：不是 `display: none`，而是把 toolbar 的 `background` / `border` / `box-shadow` 透明 + `z-index: -1` 沉到 wrap 之下 + `pointer-events: none` —— DOM 完全保留，切换图片时无重排 / 抖动
+
+### 懒加载跟进
+
+- 第一次开 lightbox 时对文章根挂一个 `MutationObserver`，监听 `childList + subtree + attributes(src / data-original / data-zoomfile / data-src / data-lazy-src / file)`
+- 论坛懒加载追加 `<img>` / 替换占位 src → 等 `onload` 拿到真实 src 后 append 到轮播；lightbox 已开时实时刷新计数器，用户停留当前图不强制跳转
+- 关闭 lightbox **不**解绑 observer（WeakMap 让 observer 与根 DOM 同寿命，跨次打开累积 list）
+
+### 隐藏 DOM 过滤
+
+- 三条入库路径都过滤：祖先链存在 `display: none` / `visibility: hidden|collapse` 的元素不进轮播
+- 论坛折叠区 / 回复可见图 / 付费隐藏占位等场景：首次扫时被过滤；用户展开后再次开 lightbox 会触发 `syncNewlyVisible` 增量补扫，把新可见图补进 list
+- observer 里的 `seen` 集合不被可见性失败污染 —— 后续 display 切换时还能被重新检查
+
+### 性能 / 视觉细节
+
+- toolbar / counter / mask 全走 Shadow DOM + `panel-theme.ts` 颜色变量，跟随论坛深浅主题
+- toolbar 圆角 22px 胶囊形，`var(--panel-surface)` 背景 + `var(--panel-border)` 边框 + 阴影 `0 2px 8px rgba(0,0,0,.2)`
+- 图标按钮内联 SVG 注入（`fill: currentColor`，跟随按钮 color），尺寸 18×18
+- 拖拽后 50ms 内的 click 用 capture-phase `stopPropagation + preventDefault` 吞掉，避免被浏览器当成双击第一下触发 100% 切换
+
 ## 协作约定
 
 项目内有完整的 AI 协作约定文件 [CLAUDE.md](./CLAUDE.md)，涵盖：
@@ -116,9 +173,9 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 
 - 端口 5300（避开 WSL / Hyper-V 保留段 5041–5240）
 - CORS 仅放行 `chrome-extension://` origin
-- `permissions: ['sidePanel', 'contentSettings', 'tabs', 'storage']`
+- `permissions: ['sidePanel', 'contentSettings', 'tabs', 'storage', 'alarms']`（`alarms` 给 service worker keepalive，避免图床上传转发被回收）
 - `host_permissions: ['<all_urls>']`（仅 content script 内部跨域请求使用）
-- `chrome.storage.local` 仅写：`autoCheckinEnabled` / `lastCheckin` / `imageHostHistory` / `imageHostSessionUuid` / `floatBtnPosition` —— **不存放 token / cookie / 密码**
+- `chrome.storage.local` 仅写：`autoCheckinEnabled` / `lastCheckin` / `imageHostHistory` / `imageHostSessionUuid` / `floatBtnPosition` / `forumTheme` / `whatslinkCache` / `bjxAutoPreview` —— **不存放 token / cookie / 密码**
 
 ## 兼容性
 
@@ -141,6 +198,7 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 | 自动签到                 | `#fx_checkin_topb` / `#fx_checkin` / `#signin` / `#checkin` / `#hd_sign`（顺序尝试）                         |
 | 浮动按钮                 | 全站通用，不依赖模板                                                                                         |
 | 外站链接 / 百家姓 / 油管 | 楼层节点 `td.t_f[id^="postmessage_"]` + `id^="postmessage_"` 数字 ID（Discuz 标准约定）                      |
+| **图片灯箱**             | **`article.article-content, .article-content, td.t_f[id^="postline_"], .pattl, .pcb, .message`**（WordPress 文章 + Discuz 楼层 + `<ignore_js_op>` 附件容器）；`<img>` / `<video>` / `<iframe>` / `<embed>` 四类媒体；SVG URL（`*.svg` / `data:image/svg+xml`）跳过 |
 | 我的 / 收藏 / 好友       | `home.php?mod=space&uid=XXX&do=favorite                                                                      | friend`（Discuz 标准接口） |
 | 搜索                     | `search.php?mod=forum` + 动态 `searchid`（Discuz 标准接口）                                                  |
 | 图床                     | `https://tu.wnflb2023.com/application/upload.php`，multipart 字段 `name` / `uuid` / `file`（外部站独立协议） |
@@ -176,21 +234,24 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | 模拟点击 `fx_checkin` 等签到按钮          | 自动签到 / popup 触发                                                                                            | 等同用户主动点击                              |
 | 在页面内 `fetch` Discuz 接口（带 cookie） | sidepanel / popup 通过 `chrome.tabs.sendMessage` 转发                                                            | 避免 CORS；与登录态下手动访问论坛页面行为一致 |
-| 注入新的 DOM 节点                         | viewthread 详情页：楼主正文段后追加「外站链接」折叠面板 + 百家姓 / 油管 / 白字链接结果行；wnflb2023.com 浮动按钮 | 辅助功能；不影响论坛原有结构                  |
+| 注入新的 DOM 节点                         | viewthread 详情页：楼主正文段后追加「外站链接」折叠面板 + 百家姓 / 油管 / 白字链接结果行；wnflb2023.com 浮动按钮；详情 / 文章页：图片灯箱 modal（仅用户点击媒体时创建，关闭即销毁） | 辅助功能；不影响论坛原有结构                  |
 | Shadow DOM 包裹                           | 注入的 DOM 都用 Shadow DOM 隔离                                                                                  | 防止论坛脚本误清理我们的样式                  |
 
 未做任何以下操作：自动发帖 / 自动回帖 / 自动私信、批量操作、绕过登录验证、抓取他人隐私数据、跨域跟踪用户行为。
 
 ### 权限与数据
 
-- 权限范围（`manifest.permissions`）：`sidePanel`、`contentSettings`、`tabs`、`storage` —— **无任何写入型权限**
+- 权限范围（`manifest.permissions`）：`sidePanel`、`contentSettings`、`tabs`、`storage`、`alarms` —— `alarms` 仅给 service worker keepalive 用，无任何写入型权限
 - 主机权限（`manifest.host_permissions`）：`<all_urls>` —— 仅供 content script 在白名单站点内部发起 `fetch` 时使用，不会向其它域发起主动请求
-- `chrome.storage.local` 仅写以下字段，全部为本机开关 / 缓存 / 位置：
+- `chrome.storage.local` 仅写以下字段，全部为本机开关 / 缓存 / 位置 / 主题：
   - `autoCheckinEnabled`（boolean）：自动签到开关
   - `lastCheckin`（`{ host, date }`）：今日已签到标记
   - `floatBtnPosition`（`{ right, bottom }`）：浮动按钮位置
   - `imageHostHistory`（UploadedImage[]）：图床最近 50 张历史
   - `imageHostSessionUuid`（string）：当前图床批次 UUID
+  - `forumTheme`（`'light' | 'dark'`）：论坛当前主题（用于面板跟随）
+  - `whatslinkCache`（Record<string, WhatslinkPreview>）：磁链元数据预览缓存（按 infohash 维度）
+  - `bjxAutoPreview`（boolean）：百家姓自动预览开关
 - **不存放任何** token / cookie / 密码 / 论坛账号凭证 / 浏览器外传数据
 - 没有任何远程上报 / 统计 / 第三方分析 SDK；扩展不连接任何外部服务器，所有网络请求都发给 Discuz 论坛 / WordPress / `tu.wnflb2023.com` 三个原始站点
 

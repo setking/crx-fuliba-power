@@ -5,7 +5,7 @@
  * 1. 注册 chrome.runtime.onMessage 路由，把 UI 消息转发到 content 内的能力模块
  * 2. 按页面类型触发各功能模块的入口
  *
- * 业务逻辑全部下放到 src/content/*.ts 模块（checkin / float-button / external-links / bjx）。
+ * 业务逻辑全部下放到 src/content/*.ts 模块（checkin / float-button / external-links / bjx / lightbox）。
  */
 
 import { MESSAGE_TYPES } from '@/global'
@@ -13,12 +13,13 @@ import { isLoggedIn } from '@/utils/auth'
 import { fetchForumSearch, fetchMyCounts, fetchMyFavorites, fetchMyFriends, fetchMyThreads, getCurrentUid } from '@/utils/forum-api'
 import { dataUrlToBlob, uploadImage } from '@/utils/image-host'
 import { isArticlePage, isViewthreadPage } from '@/utils/hidden-links'
-import { isEnabledSite, UPLOAD_HOST, isFloatButtonSite } from '@/utils/sites'
+import { isEnabledSite, UPLOAD_HOST, isFloatButtonSite, isLightboxSite } from '@/utils/sites'
 import { enableBjxTransform } from '@/content/bjx'
 import { autoCheckin, triggerCheckin } from '@/content/checkin'
 import { enableExternalLinksPanel } from '@/content/external-links'
 import { mountFloatButton } from '@/content/float-button'
 import { enableForumThemeWatcher } from '@/content/theme-watcher'
+import { enableLightbox } from '@/content/lightbox'
 console.log('[CRXJS] content script loaded')
 
 // ============ popup / sidepanel → content 消息 ============
@@ -110,7 +111,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .catch(err => sendResponse({ ok: false, error: (err as Error).message }))
     }
     catch (err) {
-      sendResponse({ ok: false, error: (err as Error).message })
+      sendResponse({ ok: false, error: (err instanceof Error ? err.message : String(err)) })
     }
     return true
   }
@@ -138,6 +139,16 @@ if (isViewthreadPage()) {
     document.addEventListener('DOMContentLoaded', () => { void enableExternalLinksPanel() })
   } else {
     void enableExternalLinksPanel()
+  }
+}
+
+/** 文章图片 Lightbox：仅 Discuz 论坛（wnflb2023.com）启用，fuliba2025.net 自带轮播不再覆盖。
+ * combine isViewthreadPage 避免首页 / 列表页误启动。 */
+if (isLightboxSite(location.hostname) && isViewthreadPage()) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void enableLightbox() })
+  } else {
+    void enableLightbox()
   }
 }
 

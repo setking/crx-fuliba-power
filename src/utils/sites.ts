@@ -24,3 +24,11 @@ export function isFloatButtonSite(hostname: string): boolean {
 export function isUploadHost(hostname: string): boolean {
   return hostname === UPLOAD_HOST
 }
+
+/** Lightbox 模块启用范围：仅 Discuz 论坛域名。
+ *  - wnflb2023.com：帖子正文点图默认跳新标签页，体验差，劫持放大有意义
+ *  - fuliba2025.net：原生已有图片轮播 / 灯箱，不再覆盖
+ * 入口在 main.ts 里 combine isViewthreadPage() —— 避免在非帖子页（首页/列表）误启动 */
+export function isLightboxSite(hostname: string): boolean {
+  return hostname === 'www.wnflb2023.com'
+}
