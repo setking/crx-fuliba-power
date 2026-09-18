@@ -488,6 +488,8 @@ function findClickableMedia(target: Element): { root: HTMLElement; item: Lightbo
   let index = -1
   if (media instanceof HTMLImageElement) {
     const clickedSrc = readImageSrc(media).split('#')[0] ?? ''
+    // 表情包防御：readImageSrc 已过滤，此处二次确认（防 observer/sync 阶段 list 包含表情包）
+    if (isSmileyImage(clickedSrc)) return null
     index = images.findIndex(i => i.kind === 'image' && i.src === clickedSrc)
     item = images[index]
   }
@@ -1242,9 +1244,13 @@ function onDocClick(e: MouseEvent): void {
   const media = target.closest('img, video, iframe, embed')
   if (!media) return
   if (!isInsideArticleRoot(media)) return
-  // SVG 跳过
-  if (media instanceof HTMLImageElement && isSvgUrl(readImageSrc(media))) return
-  // 是正文里的媒体：阻止冒泡到外层 <a> 触发跳转
+  // SVG / 表情包 / 外站 <a> 包裹：不能进 lightbox，也不能吞事件 —— 让浏览器原生行为照旧
+  if (media instanceof HTMLImageElement) {
+    const src = readImageSrc(media)
+    if (isSvgUrl(src) || isSmileyImage(src)) return
+  }
+  if (isWrappedInExternalLink(media)) return
+  // 是正文里的可劫持媒体：阻止冒泡到外层 <a> 触发跳转
   e.preventDefault()
   e.stopPropagation()
   openLightboxFromMedia(media)

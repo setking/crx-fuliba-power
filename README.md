@@ -159,6 +159,7 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
   - `<a>.href` 是 `attachment:` / `data:` / 相对路径 / 同 host → 内站附件 / 内站图，正常进 lightbox
   - `<a>.href` 是 http(s) 且 host ≠ location.host → 外站伪装链接，跳过 lightbox + 不劫持点击
 - 应用于 4 个入口：`collectImagesFromRoot` 4 个 querySelectorAll 循环 / `mediaToLightboxImage` / `syncNewlyVisible` / `findClickableMedia`
+- **点击行为**：外站 `<a>` 包裹的图片点不到 lightbox，也**不劫持点击**（`onDocClick` 在 preventDefault 前先走 `isWrappedInExternalLink`；不命中即 return，浏览器原生 `<a>.href` 跳转照旧）
 
 ### 表情包过滤
 
@@ -167,6 +168,7 @@ pnpm build            # vue-tsc -b && vite build，产物 dist/ + release/*.zip
 - `readImageSrc` 在 attribute 读取阶段就把候选项过滤掉 —— 不再返回带 smiley 路径的 src（返回空串）
 - `mediaToLightboxImage` / `collectImagesFromRoot` / `syncNewlyVisible` / observer 的 `load` 回调 / `attributes` 回调均二次校验，避免 lazy-load 后续把占位换成表情图时漏过
 - 只对 `<img>` 生效；`<video>` / `<iframe>` / `<embed>` 不会出现表情包
+- **点击行为**：表情包图片不进 lightbox，但**也不会被劫持**（`onDocClick` 在 preventDefault 前先检查；不命中即 return，让浏览器原生行为照旧 —— 论坛脚本弹层 / 复制 / 其它预览仍有效）
 - 点击事件层面：`<a>` 包裹的媒体 `findClickableMedia` 返回 null → 原生 `<a>.href` 自然触发跳转，浏览器「新标签页打开外站」行为保留
 
 ### 性能 / 视觉细节
