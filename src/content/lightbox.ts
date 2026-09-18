@@ -157,18 +157,27 @@ function isSvgUrl(src: string): boolean {
   return /\.svg(\.|$)/i.test(noFrag) || /^data:image\/svg\+xml/i.test(noFrag.trim())
 }
 
-/** 从 img 元素抽 src，按优先级尝试多个属性 */
+/** 判断 src 是否为 Discuz 表情包（`static/image/smiley` 目录下都是论坛表情图标）。
+ * 匹配 `data-original` / `data-zoomfile` / `src` 任一字段里出现路径关键字即视为表情包。
+ * 大小写不敏感，避免不同论坛镜像站点路径差异。 */
+function isSmileyImage(src: string): boolean {
+  if (!src) return false
+  return /static\/image\/smiley/i.test(src)
+}
+
+/** 从 img 元素抽 src，按优先级尝试多个属性；同时把任意候选项里包含 `smiley` 路径的表情包过滤掉 */
 function readImageSrc(img: HTMLImageElement): string {
   // 1. currentSrc —— 论坛 lazy-load 后真实加载的 src（Discuz 附件链走这里）
-  if (img.currentSrc) return img.currentSrc
+  if (img.currentSrc && !isSmileyImage(img.currentSrc)) return img.currentSrc
   // 2. data-* 常见的 lazy-load 提示属性
   const dataAttrs = ['data-original', 'data-zoomfile', 'data-src', 'data-lazy-src', 'file']
   for (const attr of dataAttrs) {
     const v = img.getAttribute(attr)
-    if (v && v.trim()) return v
+    if (v && v.trim() && !isSmileyImage(v)) return v
   }
-  // 3. fallback 到原生 src
-  return img.getAttribute('src') ?? ''
+  // 3. fallback 到原生 src —— 表情包场景论坛常用 `<img src="static/image/smiley/...">`
+  const fallback = img.getAttribute('src') ?? ''
+  return isSmileyImage(fallback) ? '' : fallback
 }
 
 /** 从 <video> 抽 src + poster。优先取 source 元素 */
@@ -212,6 +221,7 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
+    if (isSmileyImage(raw)) continue
     const normalized = raw.split('#')[0] ?? raw
     if (!normalized || seen.has(normalized)) continue
     seen.add(normalized)
@@ -267,6 +277,7 @@ function mediaToLightboxImage(el: Element): LightboxImage | null {
     const src = readImageSrc(el)
     if (!src) return null
     if (isSvgUrl(src)) return null
+    if (isSmileyImage(src)) return null
     return { kind: 'image', src: src.split('#')[0] ?? src }
   }
   if (el instanceof HTMLVideoElement) {
@@ -309,6 +320,7 @@ function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
+    if (isSmileyImage(raw)) continue
     const normalized = raw.split('#')[0] ?? raw
     if (!normalized) continue
     const item: LightboxImage = { kind: 'image', src: normalized }
@@ -384,7 +396,7 @@ function ensureRootObserver(root: HTMLElement): void {
             if (node instanceof HTMLImageElement && !node.complete) {
               node.addEventListener('load', () => {
                 const realSrc = readImageSrc(node)
-                if (!realSrc || isSvgUrl(realSrc)) return
+                if (!realSrc || isSvgUrl(realSrc) || isSmileyImage(realSrc)) return
                 const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
                 if (!hasInList(list, realItem)) {
                   list.push(realItem)
@@ -409,7 +421,7 @@ function ensureRootObserver(root: HTMLElement): void {
           if (child instanceof HTMLImageElement && !child.complete) {
             child.addEventListener('load', () => {
               const realSrc = readImageSrc(child)
-              if (!realSrc || isSvgUrl(realSrc)) return
+              if (!realSrc || isSvgUrl(realSrc) || isSmileyImage(realSrc)) return
               const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
               if (!hasInList(list, realItem)) {
                 list.push(realItem)
@@ -430,7 +442,7 @@ function ensureRootObserver(root: HTMLElement): void {
         // 但 src 变了意味着可能是另一张图，去重靠 hasInList
         seen.add(img)
         const realSrc = readImageSrc(img)
-        if (realSrc && !isSvgUrl(realSrc)) {
+        if (realSrc && !isSvgUrl(realSrc) && !isSmileyImage(realSrc)) {
           const realItem: LightboxImage = { kind: 'image', src: realSrc.split('#')[0] ?? realSrc }
           // 若原占位未入库、现在解析到真实 src → 入库
           if (!hasInList(list, realItem)) {
