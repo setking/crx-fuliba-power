@@ -12,6 +12,7 @@ dist
 release
 dist-ssr
 *.local
+promo-post.md
 
 # TypeScript incremental build cache (每次编译都会变，不入版本控制)
 tsconfig.tsbuildinfo
