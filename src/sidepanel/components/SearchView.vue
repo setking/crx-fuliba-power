@@ -68,7 +68,7 @@ async function ensureSearchCached(targetCount: number): Promise<void> {
     }
 
     if (searchCount.value === null) {
-      searchCount.value = { total: data.total, pageSize: data.pageSize }
+      searchCount.value = { total: data.total, pageSize: data.pageSize, pages: data.pages ?? null }
     }
     else if (searchCount.value.total === null && data.pageSize !== null) {
       searchCount.value = { ...searchCount.value, pageSize: data.pageSize }
@@ -100,7 +100,7 @@ async function loadSearch(page = searchPage.value) {
       searchCount.value = { ...searchCount.value, total: searchCache.value.items.length }
     }
     else if (searchCount.value === null && searchCache.value.reachedEnd) {
-      searchCount.value = { total: searchCache.value.items.length, pageSize: searchCache.value.firstBatchSize }
+      searchCount.value = { total: searchCache.value.items.length, pageSize: searchCache.value.firstBatchSize, pages: null }
     }
     searchPage.value = normalizePage(nextPage, searchPageCount.value)
     searchState.value = 'idle'

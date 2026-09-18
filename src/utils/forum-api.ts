@@ -83,6 +83,34 @@ export function parseForumCount(text: string): number | null {
   return parenthesized ? toCount(parenthesized[1]) : null
 }
 
+/**
+ * 从 Discuz 分页条提取总页数。
+ * 典型 HTML：`<span title="共 2 页"> / 2 页</span>` 或纯文本 `共 2 页`。
+ * 论坛三个列表页（帖子 / 收藏 / 好友）的 `.pg` 都会带这个文本，是 Discuz 模板通用约定。
+ *
+ * 注意：不能复用 `parseForumCount` —— "共 2 页" 也会被其"共 X"前缀规则命中并返回 2（页数），
+ * 但调用方把它当总数 total 用 → total=2, pageSize=20, pageCount=1 → 分页条不显示。
+ * 显式把语义拆开："共 X 页" → X 是页数，不是总数。
+ */
+export function parseForumPageCount(doc: Document, selectors: string[] = ['.pg']): number | null {
+  for (const selector of selectors) {
+    for (const el of Array.from(doc.querySelectorAll(selector))) {
+      const text = (el.textContent ?? '').replace(/\s+/g, ' ').trim()
+      // 1. 优先看 title 属性："共 2 页"
+      const titleAttr = el.querySelector('[title*="共"]')?.getAttribute('title')
+        ?? el.querySelector('[title*="页"]')?.getAttribute('title')
+      if (titleAttr) {
+        const m = titleAttr.match(/共\s*([\d,]+)\s*页/i)
+        if (m) return toCount(m[1])
+      }
+      // 2. fallback：正文里的 "共 X 页" 或 "/ X 页"
+      const m = text.match(/共\s*([\d,]+)\s*页/) ?? text.match(/\/\s*([\d,]+)\s*页/)
+      if (m) return toCount(m[1])
+    }
+  }
+  return null
+}
+
 function parseDocumentCount(doc: Document, selectors: string[]): number | null {
   for (const selector of selectors) {
     for (const element of Array.from(doc.querySelectorAll(selector))) {
@@ -291,7 +319,10 @@ export function parseForumSearchPage(doc: Document, responseUrl: string): ForumS
   }
 
   const uniqueItems = Array.from(new Map(items.map(item => [item.url, item])).values())
-  const count = parseDocumentCount(doc, ['.sttl h2', '.search-info, .bm_h h2, .bm_h, .tbmu, .pg'])
+  // .pg 不放进来：会误把"共 X 页"里的 X 当 total，导致 total=页数、pageCount=1、分页条不显示。
+  // 页数单独走 parseForumPageCount 写到 pages 字段。
+  const count = parseDocumentCount(doc, ['.sttl h2', '.search-info', '.bm_h h2', '.bm_h', '.tbmu'])
+  const pages = parseForumPageCount(doc)
   const pageSize = parseDocumentPageSize(doc, itemSelectors) ?? (uniqueItems.length > 0 ? uniqueItems.length : null)
   const documentSearchId = doc.querySelector?.('input[name="searchid"]')?.getAttribute('value')
     || doc.querySelector?.('[data-searchid]')?.getAttribute('data-searchid')
@@ -306,6 +337,7 @@ export function parseForumSearchPage(doc: Document, responseUrl: string): ForumS
     items: uniqueItems,
     total: count,
     pageSize,
+    pages,
     searchId,
   }
 }
@@ -358,16 +390,21 @@ export async function fetchMyCounts(uid: string): Promise<ForumCounts> {
 
   return {
     threads: {
-      total: parseDocumentCount(threadsDoc, ['.bm_h h2', '.bm_h', '.tbmu', '.pg']),
+      // 帖子页通常在 .tbmu 给出"X 个主题"等明确总数；.pg 只给页数（见 parseForumPageCount）
+      total: parseDocumentCount(threadsDoc, ['.bm_h h2', '.bm_h', '.tbmu']),
       pageSize: parseDocumentPageSize(threadsDoc, ['tbody[id^="normalthread_"]', 'a[href*="forum.php?mod=viewthread"]']) ?? DEFAULT_PAGE_SIZE,
+      pages: parseForumPageCount(threadsDoc),
     },
     favorites: {
-      total: parseDocumentCount(favoritesDoc, ['.bm_h h2', '.bm_h', '.tbmu', '.pg']),
+      // 收藏页 .tbmu 没有总数文本，只能从 .pg 的"共 X 页"反推
+      total: parseDocumentCount(favoritesDoc, ['.bm_h h2', '.bm_h', '.tbmu']),
       pageSize: parseDocumentPageSize(favoritesDoc, ['#favorite_ul > li[id^="fav_"]']) ?? DEFAULT_PAGE_SIZE,
+      pages: parseForumPageCount(favoritesDoc),
     },
     friends: {
-      total: parseDocumentCount(friendsDoc, ['.tbmu p.y .xw1', '.tbmu', '.bm_h h2', '.bm_h', '.pg']),
+      total: parseDocumentCount(friendsDoc, ['.tbmu p.y .xw1', '.tbmu', '.bm_h h2', '.bm_h']),
       pageSize: parseDocumentPageSize(friendsDoc, ['ul.bml li', '.bm .mlist li', 'a[href*="home.php?mod=space&uid="]']) ?? DEFAULT_PAGE_SIZE,
+      pages: parseForumPageCount(friendsDoc),
     },
   }
 }

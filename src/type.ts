@@ -29,6 +29,8 @@ export interface ForumSearchPage {
   items: SearchResult[]
   total: number | null
   pageSize: number | null
+  /** Discuz .pg 解析的"共 X 页"页数；total 拿不到时用于反推 total。 */
+  pages: number | null
   searchId: string | null
 }
 
@@ -48,6 +50,8 @@ export interface Friend {
 export interface ForumCount {
   total: number | null
   pageSize: number | null
+  /** Discuz .pg 分页条的"共 X 页"解析出的总页数；firstBatchSize/total 不可靠时优先用它。 */
+  pages: number | null
 }
 
 export interface ForumCounts {

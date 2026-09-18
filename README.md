@@ -14,7 +14,7 @@ Chrome MV3 扩展，针对两个 Discuz! 论坛站提供自动化与辅助功能
 | 外站链接面板               | content script（viewthread 详情页）                  | 扫描帖子正文的 `<a href>`，过滤论坛内部跳转后以外站链接面板形式插入到楼主正文段之后；面板含域名 / URL / 复制按钮（高对比主色 + hover/active 反馈）；所有样式走 Shadow DOM 隔离论坛 CSS，并跟随论坛 light/dark 主题（panel-theme.ts 色板）                                          |
 | 百家姓 / 油管转换          | content script（详情页 + WordPress 文章页 + 评论区） | 自动识别帖子正文 / 评论里的百家姓代码（连续字典字符）→ 转 `magnet:?xt=urn:btih:...` 链接（自动预览 whatslink 磁链元数据：标题 / 大小 / 文件列表）；`watch?v=XXX` → YouTube 链接；`油管/channelXXX` h4 → 频道链接；白字隐藏 `<a>` → "好孩子看不见" 提示 |
 | 图片灯箱（Lightbox）       | content script（详情页 / 文章页正文）                | 点击正文 `<img>` / `<video>` / `<iframe>` / `<embed>` 弹出 ShadowRoot 模态大图；滚轮缩放 + 工具栏 ±/↺/⟲/↻ + 双击 100% 切换 + 拖拽 + 键盘翻页；懒加载新图实时追加进轮播；过滤隐藏 DOM + 外站 `<a>` 包裹 + Discuz 静态 UI 图标（`static/image/smiley\|common\|filetype\|magic\|admincp`）；SVG 不劫持；视频时底部工具栏 z-index 下沉 + 背景透明，不遮挡播放控件 |
-| 我的（帖子 / 收藏 / 好友） | Side Panel                                           | 通过 `home.php?mod=space` 抓取并复用登录 cookie，展示我的帖子 / 收藏 / 好友列表 + 分页 + 数量 badge                                                                                           |
+| 我的（帖子 / 收藏 / 好友） | Side Panel                                           | 通过 `home.php?mod=space` 抓取并复用登录 cookie，展示我的帖子 / 收藏 / 好友列表 + 分页 + 数量 badge；总数从 `.pg` 分页条的"共 X 页"反推（收藏页 `.tbmu` 没有总数文本）                                                                                           |
 | 搜索                       | Side Panel                                           | Discuz `search.php?mod=forum` 关键词搜索；首响提取动态 `searchid`，后续分页复用                                                                                                               |
 | 图床                       | Side Panel                                           | 多图批量上传到 `tu.wnflb2023.com/application/upload.php`，并发 3，4 种链接格式（URL / Markdown / HTML / BBCode），最近 50 张历史                                                              |
 | 浮动按钮消息桥             | background service worker                            | 接收 content → background 的 `OPEN_SIDE_PANEL` 消息并打开当前 tab 的 Side Panel                                                                                                               |
@@ -183,6 +183,44 @@ Discuz 自 7.x 起将论坛内置 UI 图标统一放在 `static/image/` 下，�
 - toolbar 圆角 22px 胶囊形，`var(--panel-surface)` 背景 + `var(--panel-border)` 边框 + 阴影 `0 2px 8px rgba(0,0,0,.2)`
 - 图标按钮内联 SVG 注入（`fill: currentColor`，跟随按钮 color），尺寸 18×18
 - 拖拽后 50ms 内的 click 用 capture-phase `stopPropagation + preventDefault` 吞掉，避免被浏览器当成双击第一下触发 100% 切换
+
+## Side Panel：帖子 / 收藏 / 好友 / 搜索 分页
+
+四个列表（我的帖子、收藏、好友、搜索结果）共用 `RequestCache<T>` + `ForumCount.pages` / `ForumSearchPage.pages` 数据模型，靠 `.pg` 分页条解析页数。
+
+### 总数来源
+
+- Discuz 各列表页的 `.tbmu` 一般会写"X 个主题 / X 个好友"等明确总数文本，走 `parseForumCount` 提取
+- **收藏页** `.tbmu` 不给总数文本，只在 `.pg` 上挂 `<span title="共 X 页">` —— 必须从 `.pg` 解析"共 X 页"
+- 搜索结果页同理，标题文本里"找到 X 条"可能存在但格式多变
+
+### `.pg` 解析
+
+- `parseForumPageCount(doc, ['.pg'])`：优先读 `.pg` 内 `[title*="共"]` / `[title*="页"]` 的 title 属性（"共 2 页"），fallback 到正文 `/ X 页` / `共 X 页` 文本
+- 显式与 `parseForumCount` 拆开：**"共 X 页"里的 X 是页数不是总数**，不能塞进 total 字段
+- `parseDocumentCount` 在以下页面**不能**把 `.pg` 加进 selectors：
+  - `fetchMyCounts`（帖子 / 收藏 / 好友）
+  - `parseForumSearchPage`
+  否则 `parseForumCount` 的"共 X"前缀规则会把 X 当 total 返回 → `getPageCount(2, 20)=1` → 分页条不显示
+
+### 数据流
+
+```
+content.fetchMyCounts(uid)
+  → 抓 threads / favorites / friends 三页 HTML
+  → 每个 { total: parseDocumentCount(...), pageSize: parseDocumentPageSize(...), pages: parseForumPageCount(...) }
+  → 送回 sidepanel
+
+sidepanel.App.vue
+  → pageCountFor(count): 优先 count.pages，否则 getPageCount(count.total, DEFAULT_PAGE_SIZE)
+  → :page-count prop 传给 ForumList → 渲染分页条（pageCount > 1 时）
+  → targetItemsForPage(page, count): 用 pages × pageSize 兜底推 target，
+     让 ensureCached 一次性把所有页拉完 —— 用户点翻页时数据已就绪、不阻塞
+```
+
+### `ForumCount.pages` / `ForumSearchPage.pages`
+
+`type.ts` 里两个接口都声明了 `pages: number | null`，明确语义："Discuz .pg 分页条的'共 X 页'解析出的总页数；firstBatchSize / total 不可靠时优先用它"。侧栏构造 `ForumCount` 字面量时统一带 `pages: null`（fetch 返回后回填真实值）。
 
 ## 协作约定
 

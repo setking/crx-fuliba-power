@@ -128,6 +128,9 @@ function totalFor(count: ForumCount | null): number | null {
 }
 
 function pageCountFor(count: ForumCount | null): number {
+  // 优先用 .pg 解析出的"共 X 页"——帖子/收藏/好友的 total 经常解析不到，但页数总能拿到。
+  // pages×pageSize 作 total 用做兜底，避免 total=null 导致 getPageCount=null=1 分页条不显示。
+  if (count?.pages != null && count.pages > 0) return count.pages
   return getPageCount(totalFor(count), DEFAULT_PAGE_SIZE)
 }
 
@@ -200,7 +203,7 @@ async function loadThreads(page = threadsPage.value) {
       threadsCount.value = { ...threadsCount.value, total: threadsCache.value.items.length }
     }
     else if (threadsCount.value === null) {
-      threadsCount.value = { total: threadsCache.value.items.length, pageSize: threadsCache.value.firstBatchSize }
+      threadsCount.value = { total: threadsCache.value.items.length, pageSize: threadsCache.value.firstBatchSize, pages: null }
     }
     threadsState.value = 'idle'
   }
@@ -231,7 +234,7 @@ async function loadFavorites(page = favoritesPage.value) {
       favoritesCount.value = { ...favoritesCount.value, total: favoritesCache.value.items.length }
     }
     else if (favoritesCount.value === null) {
-      favoritesCount.value = { total: favoritesCache.value.items.length, pageSize: favoritesCache.value.firstBatchSize }
+      favoritesCount.value = { total: favoritesCache.value.items.length, pageSize: favoritesCache.value.firstBatchSize, pages: null }
     }
     favoritesState.value = 'idle'
   }
@@ -262,7 +265,7 @@ async function loadFriends(page = friendsPage.value) {
       friendsCount.value = { ...friendsCount.value, total: friendsCache.value.items.length }
     }
     else if (friendsCount.value === null) {
-      friendsCount.value = { total: friendsCache.value.items.length, pageSize: friendsCache.value.firstBatchSize }
+      friendsCount.value = { total: friendsCache.value.items.length, pageSize: friendsCache.value.firstBatchSize, pages: null }
     }
     friendsState.value = 'idle'
   }
@@ -412,16 +415,18 @@ async function loadThemeState() {
       </div>
 
       <ForumList v-if="activeTab === 'threads'" kind="threads" :items="threads" :loading="threadsState === 'loading'"
-        :page="threadsPage" :total="threadsCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无帖子"
+        :page="threadsPage" :page-count="pageCountFor(threadsCount)" :total="threadsCount?.total ?? null"
+        :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无帖子"
         @open="openInTab" @page-change="changeThreadsPage" />
 
       <ForumList v-else-if="activeTab === 'favorites'" kind="favorites" :items="favorites"
-        :loading="favoritesState === 'loading'" :page="favoritesPage" :total="favoritesCount?.total ?? null"
-        :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无收藏" @open="openInTab" @page-change="changeFavoritesPage" />
+        :loading="favoritesState === 'loading'" :page="favoritesPage" :page-count="pageCountFor(favoritesCount)"
+        :total="favoritesCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无收藏"
+        @open="openInTab" @page-change="changeFavoritesPage" />
 
       <ForumList v-else kind="friends" :items="friends" :loading="friendsState === 'loading'" :page="friendsPage"
-        :total="friendsCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无好友" @open="openInTab"
-        @page-change="changeFriendsPage" />
+        :page-count="pageCountFor(friendsCount)" :total="friendsCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE"
+        empty-text="暂无好友" @open="openInTab" @page-change="changeFriendsPage" />
     </section>
 
     <SearchView v-else-if="activeOption === 'search'" :active-tab-id="activeTabId" @open="openInTab" />

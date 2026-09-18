@@ -55,7 +55,16 @@ export function itemsForDisplayPage<T>(items: T[], page: number): T[] {
  */
 export function targetItemsForPage(page: number, count: ForumCount | null): number {
   const normalizedPage = Math.max(1, page)
-  return Math.min(count?.total ?? normalizedPage * DEFAULT_PAGE_SIZE, normalizedPage * DEFAULT_PAGE_SIZE)
+  // 优先用 total；fallback 用 .pg 解析出的 pages*pageSize —— total 经常解析不到
+  // （Discuz 帖子/收藏/好友页 .tbmu 没明确总数文本），但"共 X 页" 总能拿到。
+  // 当已知总页数时（pages*pageSize > 当前页*pageSize），把目标数推到总页数对应的条数，
+  // 让 ensureCached 一次性把所有页拉完 —— 用户点翻页时数据已就绪、不阻塞。
+  const total = count?.total
+    ?? (count?.pages != null && count.pages > 0 ? count.pages * DEFAULT_PAGE_SIZE : null)
+    ?? null
+  const requiredForPage = normalizedPage * DEFAULT_PAGE_SIZE
+  if (total === null) return requiredForPage
+  return Math.min(total, Math.max(requiredForPage, total))
 }
 
 export function getPageCount(total: number | null, pageSize = DEFAULT_PAGE_SIZE): number {
