@@ -157,7 +157,13 @@ async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, mess
       cache.nextRequestPage = page + 1
       requestedPages += 1
 
+      // page>1 拿到 0 条很可能是服务器端问题（cookie/缓存/参数顺序），
+      // 不是真的到末尾。直接抛错让 UI 显示加载失败、不要污染 cache.reachedEnd。
+      // page=1 拿到 0 条则视为「真的没数据」，保留 reachedEnd=true 以便后续翻页正确处理。
       if (items.length === 0) {
+        if (page > 1) {
+          throw new Error(`第 ${page} 页返回 0 条数据，可能是论坛分页参数失效，请刷新重试`)
+        }
         cache.reachedEnd = true
         break
       }

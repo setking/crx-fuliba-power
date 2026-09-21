@@ -52,19 +52,22 @@ export function itemsForDisplayPage<T>(items: T[], page: number): T[] {
  * 目标页需要的累计 items 数：
  * - 有 total：取 total / page*pageSize 较小者（已到底）
  * - 无 total：page * pageSize（按默认分页大小估）
+ *
+ * 注：v1.0.10 起回归 on-demand —— 只确保「目标页」所需条数到齐，不再无脑把所有页
+ * 一次性拉完。原因：pre-pull 策略假设每页都稳定返回 ~pageSize 条，但 Discuz 列表页
+ * 偶发会出现 page=2 返回 0 条的情况（cookies / 缓存 / URL 参数顺序等不明原因），
+ * pre-pull 会把 reachedEnd=true 永久写下，导致后续翻页再也拉不到数据。
+ * on-demand 每次只取当前页 + 已缓存的前序页，失败就报错让用户刷新，单页失败不污染
+ * 整条 cache。
  */
 export function targetItemsForPage(page: number, count: ForumCount | null): number {
   const normalizedPage = Math.max(1, page)
-  // 优先用 total；fallback 用 .pg 解析出的 pages*pageSize —— total 经常解析不到
-  // （Discuz 帖子/收藏/好友页 .tbmu 没明确总数文本），但"共 X 页" 总能拿到。
-  // 当已知总页数时（pages*pageSize > 当前页*pageSize），把目标数推到总页数对应的条数，
-  // 让 ensureCached 一次性把所有页拉完 —— 用户点翻页时数据已就绪、不阻塞。
-  const total = count?.total
-    ?? (count?.pages != null && count.pages > 0 ? count.pages * DEFAULT_PAGE_SIZE : null)
-    ?? null
+  // 仅按已知页数 *pageSize 推 target，避免无 total 时拉过头。
+  // 之前是 pages*pageSize 兜底 → pre-pull 全部页；现在回归 page*pageSize。
+  const total = count?.total ?? null
   const requiredForPage = normalizedPage * DEFAULT_PAGE_SIZE
   if (total === null) return requiredForPage
-  return Math.min(total, Math.max(requiredForPage, total))
+  return Math.min(total, requiredForPage)
 }
 
 export function getPageCount(total: number | null, pageSize = DEFAULT_PAGE_SIZE): number {

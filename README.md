@@ -214,9 +214,16 @@ content.fetchMyCounts(uid)
 sidepanel.App.vue
   → pageCountFor(count): 优先 count.pages，否则 getPageCount(count.total, DEFAULT_PAGE_SIZE)
   → :page-count prop 传给 ForumList → 渲染分页条（pageCount > 1 时）
-  → targetItemsForPage(page, count): 用 pages × pageSize 兜底推 target，
-     让 ensureCached 一次性把所有页拉完 —— 用户点翻页时数据已就绪、不阻塞
+  → targetItemsForPage(page, count): 按当前页 * pageSize 推 target，on-demand 取当前页 +
+     已缓存前序页；不再 v1.0.9 的 pre-pull（详见下）
 ```
+
+### 拉取策略：on-demand，不 pre-pull（v1.0.10）
+
+- v1.0.9 试过 pages × pageSize 推 target，让 `ensureCached` 一次性把所有页拉完换翻页即时性
+- 实测发现：Discuz 列表页偶发 `page=2` 返回 0 条（cookie / 缓存 / URL 参数顺序等原因不明），pre-pull 把 `cache.reachedEnd=true` 永久写下 → 用户翻页后再也拉不到 page 2
+- v1.0.10 回归 on-demand：`targetItemsForPage` 只算 `page * pageSize`，每次翻页请求对应页
+- `ensureCached` 增加防御：page>1 返回 0 条视为「分页参数失效」，直接抛错让 UI 显示加载失败 + 不要污染 `reachedEnd`，用户刷新后单页失败不污染整条 cache
 
 ### `ForumCount.pages` / `ForumSearchPage.pages`
 
