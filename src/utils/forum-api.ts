@@ -384,7 +384,7 @@ export async function fetchForumSearch(keyword: string, page = 1, searchId: stri
 export async function fetchMyCounts(uid: string): Promise<ForumCounts> {
   const [threadsDoc, favoritesDoc, friendsDoc] = await Promise.all([
     fetchHtml(`https://${location.host}/forum.php?mod=guide&view=my&type=thread&page=1`),
-    fetchHtml(`https://${location.host}/home.php?mod=space&uid=${uid}&do=favorite&view=me&type=all`),
+    fetchHtml(`https://${location.host}/home.php?mod=space&uid=${uid}&do=favorite&type=all&page=1`),
     fetchHtml(`https://${location.host}/home.php?mod=space&uid=${uid}&do=friend`),
   ])
 
@@ -448,10 +448,15 @@ export async function fetchMyThreads(uid: string, page = 1): Promise<Thread[]> {
 
 /**
  * 抓取"我的收藏"
- * URL: home.php?mod=space&uid={uid}&do=favorite&view=me&type=all
+ * URL: home.php?mod=space&uid={uid}&do=favorite&type=all[&page=N]
+ *
+ * 注意：**不**加 `view=me` —— Discuz 在 `view=me&page=N` 组合下会把路由切到"全部收藏"
+ * handler，#favorite_ul 拿不到当前用户的收藏项（返回 0 条）。
+ * 实测可用的 page=2 URL：`home.php?mod=space&uid=86019&do=favorite&type=all&page=2`
+ * — 不带 view=me。对当前登录用户而言，`do=favorite&type=all` 默认就是"我的收藏"。
  */
 export async function fetchMyFavorites(uid: string, page = 1): Promise<Favorite[]> {
-  const url = `https://${location.host}/home.php?mod=space&uid=${uid}&do=favorite&view=me&type=all&page=${page}`
+  const url = `https://${location.host}/home.php?mod=space&uid=${uid}&do=favorite&type=all&page=${page}`
   console.log('[forum-api] fetch favorites:', url)
   const doc = await fetchHtml(url)
 

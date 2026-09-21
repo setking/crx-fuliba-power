@@ -225,6 +225,13 @@ sidepanel.App.vue
 - v1.0.10 回归 on-demand：`targetItemsForPage` 只算 `page * pageSize`，每次翻页请求对应页
 - `ensureCached` 增加防御：page>1 返回 0 条视为「分页参数失效」，直接抛错让 UI 显示加载失败 + 不要污染 `reachedEnd`，用户刷新后单页失败不污染整条 cache
 
+### 收藏页 URL：去掉 `view=me`（v1.0.10）
+
+- 旧 URL：`home.php?mod=space&uid={uid}&do=favorite&view=me&type=all[&page=N]`
+- 旧 URL 在 `&page=2` 时被 Discuz 路由切到"全部收藏"handler，`#favorite_ul` 拿不到当前用户的收藏项 → fetchMyFavorites(uid, 2) 返回 0 条
+- 实测可用 URL（用户提供）：`home.php?mod=space&uid={uid}&do=favorite&type=all&page=2`
+- 对当前登录用户，`do=favorite&type=all` 默认就是"我的收藏"，无需显式 `view=me`
+
 ### `ForumCount.pages` / `ForumSearchPage.pages`
 
 `type.ts` 里两个接口都声明了 `pages: number | null`，明确语义："Discuz .pg 分页条的'共 X 页'解析出的总页数；firstBatchSize / total 不可靠时优先用它"。侧栏构造 `ForumCount` 字面量时统一带 `pages: null`（fetch 返回后回填真实值）。
