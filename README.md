@@ -250,6 +250,12 @@ sidepanel.App.vue
 - 修复：displayCount 优先 `count.pages * count.pageSize`，没 pages 才退到 `total` / `—`
 - 副作用：`loadThreads/loadFavorites/loadFriends` 末尾的 `cache.items.length → count.total` fallback 写成 dead code（displayCount 不再读 `total`），但未清理，避免本次改动扩散；可单独 PR 处理
 
+### loadList<T>：合并三个 tab 的 load 函数（v1.0.14）
+
+- 现象：`loadThreads` / `loadFavorites` / `loadFriends` 三个函数几乎一字不差 —— 差异只在 cache/count/page/state ref + messageType + 错误标签（帖子/收藏/好友），逻辑完全一致
+- 修复：抽出 `loadList<T>(opts, page?)` 泛型函数，三个 `loadX` 仅作为 thin wrapper 配置不同 opts。错误信息「加载{label}失败」由 label 区分，三个 tab 错误信息保留
+- 不动：`changeThreadsPage` / `changeFavoritesPage` / `changeFriendsPage` 一行 wrapper（可读性 > DRY）、`switchTab` 三段 if、`refresh` 三元 —— 都保留。`loadList` 末尾的 `cache.items.length → count.total` dead code 仍未清理
+
 ## 协作约定
 
 项目内有完整的 AI 协作约定文件 [CLAUDE.md](./CLAUDE.md)，涵盖：

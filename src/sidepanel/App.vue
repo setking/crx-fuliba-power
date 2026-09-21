@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, type Ref } from 'vue'
 import { DEFAULT_PAGE_SIZE, MESSAGE_TYPES } from '@/global'
 import type { Favorite, ForumCount, ForumCounts, ForumTab, Friend, LoginStatus, Thread } from '@/type'
 import ForumList from '@/sidepanel/components/ForumList.vue'
@@ -45,8 +45,8 @@ function targetItemsForPage(page: number, count: ForumCount | null): number {
   // - 有真实 pages: 取 min(pages*pageSize, page*pageSize) —— 不会拉超出页数的条目
   // - 没 pages: 直接 page*pageSize（按默认分页大小估）
   //
-  // 不能用 count.total 截断：loadFavorites 末尾会把 cache.items.length 写进
-  // favoritesCount.total 兜底，但 cache.items.length 实际只是「已加载」不是「真实总数」。
+  // 不能用 count.total 截断：loadList 末尾会把 cache.items.length 写进
+  // count.total 兜底，但 cache.items.length 实际只是「已加载」不是「真实总数」。
   // 当真实总数解析不到（收藏页 .tbmu 没有），total = cache.items.length = 20，
   // page=2 时 Math.min(20, 40) = 20 → ensureCached 不进 while → 翻页列表变空。
   const normalizedPage = Math.max(1, page)
@@ -196,97 +196,83 @@ function resetRequestCaches() {
   friendsPage.value = 1
 }
 
-async function loadThreads(page = threadsPage.value) {
+// loadList<T>：帖子/收藏/好友三个 tab 共用的「加载指定页」流程。
+// 三个 loadX 函数只是配置不同的 cache/count/page/state/messageType/label。
+// 错误信息「加载{label}失败」由 label 决定，所以「帖子/收藏/好友」区分保留。
+async function loadList<T>(
+  opts: {
+    cache: Ref<RequestCache<T>>
+    count: Ref<ForumCount | null>
+    page: Ref<number>
+    state: Ref<LoadingState>
+    messageType: string
+    label: string
+  },
+  page?: number,
+): Promise<void> {
   if (!activeTabId.value) activeTabId.value = await getActiveTab().then(t => t?.id ?? null)
   if (!activeTabId.value) {
     errorMsg.value = '找不到当前标签页'
-    threadsState.value = 'error'
+    opts.state.value = 'error'
     return
   }
-  const nextPage = normalizePage(page, pageCountFor(threadsCount.value))
-  threadsPage.value = nextPage
-  threadsState.value = 'loading'
+  const nextPage = normalizePage(page ?? opts.page.value, pageCountFor(opts.count.value))
+  opts.page.value = nextPage
+  opts.state.value = 'loading'
   errorMsg.value = ''
   try {
     await ensureCached(
-      threadsCache.value,
-      targetItemsForPage(nextPage, threadsCount.value),
-      MESSAGE_TYPES.FETCH_THREADS,
+      opts.cache.value,
+      targetItemsForPage(nextPage, opts.count.value),
+      opts.messageType,
     )
-    if (threadsCount.value?.total === null) {
-      threadsCount.value = { ...threadsCount.value, total: threadsCache.value.items.length }
+    // dead code (v1.0.13 已让 displayCount 不读 total)，保留作为防御。
+    // 后续单独 PR 清。
+    if (opts.count.value?.total === null) {
+      opts.count.value = { ...opts.count.value, total: opts.cache.value.items.length }
     }
-    else if (threadsCount.value === null) {
-      threadsCount.value = { total: threadsCache.value.items.length, pageSize: threadsCache.value.firstBatchSize, pages: null }
+    else if (opts.count.value === null) {
+      opts.count.value = { total: opts.cache.value.items.length, pageSize: opts.cache.value.firstBatchSize, pages: null }
     }
-    threadsState.value = 'idle'
+    opts.state.value = 'idle'
   }
   catch (e) {
-    errorMsg.value = `加载帖子失败：${(e as Error).message}`
-    threadsState.value = 'error'
+    errorMsg.value = `加载${opts.label}失败：${(e as Error).message}`
+    opts.state.value = 'error'
   }
+}
+
+async function loadThreads(page = threadsPage.value) {
+  return loadList({
+    cache: threadsCache,
+    count: threadsCount,
+    page: threadsPage,
+    state: threadsState,
+    messageType: MESSAGE_TYPES.FETCH_THREADS,
+    label: '帖子',
+  }, page)
 }
 
 async function loadFavorites(page = favoritesPage.value) {
-  if (!activeTabId.value) activeTabId.value = await getActiveTab().then(t => t?.id ?? null)
-  if (!activeTabId.value) {
-    errorMsg.value = '找不到当前标签页'
-    favoritesState.value = 'error'
-    return
-  }
-  const nextPage = normalizePage(page, pageCountFor(favoritesCount.value))
-  favoritesPage.value = nextPage
-  favoritesState.value = 'loading'
-  errorMsg.value = ''
-  try {
-    await ensureCached(
-      favoritesCache.value,
-      targetItemsForPage(nextPage, favoritesCount.value),
-      MESSAGE_TYPES.FETCH_FAVORITES,
-    )
-    if (favoritesCount.value?.total === null) {
-      favoritesCount.value = { ...favoritesCount.value, total: favoritesCache.value.items.length }
-    }
-    else if (favoritesCount.value === null) {
-      favoritesCount.value = { total: favoritesCache.value.items.length, pageSize: favoritesCache.value.firstBatchSize, pages: null }
-    }
-    favoritesState.value = 'idle'
-  }
-  catch (e) {
-    errorMsg.value = `加载收藏失败：${(e as Error).message}`
-    favoritesState.value = 'error'
-  }
+  return loadList({
+    cache: favoritesCache,
+    count: favoritesCount,
+    page: favoritesPage,
+    state: favoritesState,
+    messageType: MESSAGE_TYPES.FETCH_FAVORITES,
+    label: '收藏',
+  }, page)
 }
 
 async function loadFriends(page = friendsPage.value) {
-  if (!activeTabId.value) activeTabId.value = await getActiveTab().then(t => t?.id ?? null)
-  if (!activeTabId.value) {
-    errorMsg.value = '找不到当前标签页'
-    friendsState.value = 'error'
-    return
-  }
-  const nextPage = normalizePage(page, pageCountFor(friendsCount.value))
-  friendsPage.value = nextPage
-  friendsState.value = 'loading'
-  errorMsg.value = ''
-  try {
-    await ensureCached(
-      friendsCache.value,
-      targetItemsForPage(nextPage, friendsCount.value),
-      MESSAGE_TYPES.FETCH_FRIENDS,
-    )
-    if (friendsCount.value?.total === null) {
-      friendsCount.value = { ...friendsCount.value, total: friendsCache.value.items.length }
-    }
-    else if (friendsCount.value === null) {
-      friendsCount.value = { total: friendsCache.value.items.length, pageSize: friendsCache.value.firstBatchSize, pages: null }
-    }
-    friendsState.value = 'idle'
-  }
-  catch (e) {
-    errorMsg.value = `加载好友失败：${(e as Error).message}`
-    friendsState.value = 'error'
-  }
+  return loadList({
+    cache: friendsCache,
+    count: friendsCount,
+    page: friendsPage,
+    state: friendsState,
+    messageType: MESSAGE_TYPES.FETCH_FRIENDS,
+    label: '好友',
+  }, page)
 }
 
 async function refresh() {
