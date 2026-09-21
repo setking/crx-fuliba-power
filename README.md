@@ -243,6 +243,13 @@ sidepanel.App.vue
 - 修复：target 只用 `count.pages`（或 page×pageSize）作上限，不读 `count.total` —— 因为 pageCountFor 已经把 page clamp 到 ≤ pages，不可能拉超页
 - 副作用：`loadFavorites` 末尾写的 `favoritesCount.total` 不再被 target 计算用到（仍是错的「已加载条数」），后续可以单独清理
 
+### displayCount：tab 数量 badge 用 pages×pageSize 反推（v1.0.13）
+
+- 现象：帖子 / 收藏 / 好友 tab 右上角的数量 badge 一直显示 `—`，必须用户点过该 tab 后才会显示数字
+- 根因：`displayCount` 只读 `count.total`。三个 Discuz 页面 `.tbmu` 都没有总数文本，`fetchMyCounts` 返回的 `total=null` → 显示 `—`。`.pg` 的"共 X 页"和 `pageSize` 都能解析到，`pages × pageSize` 就是真实总数 —— 但 `displayCount` 没用到
+- 修复：displayCount 优先 `count.pages * count.pageSize`，没 pages 才退到 `total` / `—`
+- 副作用：`loadThreads/loadFavorites/loadFriends` 末尾的 `cache.items.length → count.total` fallback 写成 dead code（displayCount 不再读 `total`），但未清理，避免本次改动扩散；可单独 PR 处理
+
 ## 协作约定
 
 项目内有完整的 AI 协作约定文件 [CLAUDE.md](./CLAUDE.md)，涵盖：

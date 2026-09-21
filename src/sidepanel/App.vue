@@ -145,9 +145,6 @@ function pageCountFor(count: ForumCount | null): number {
   return getPageCount(totalFor(count), DEFAULT_PAGE_SIZE)
 }
 
-function displayCount(count: ForumCount | null): number | string {
-  return totalFor(count) ?? '—'
-}
 
 async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, messageType: string): Promise<void> {
   if (!activeTabId.value) throw new Error('找不到当前标签页')
@@ -413,13 +410,13 @@ async function loadThemeState() {
 
       <nav class="tabs">
         <button class="tab" :class="{ active: activeTab === 'threads' }" @click="switchTab('threads')">
-          📝 帖子 ({{ countsState === 'loading' ? '…' : displayCount(threadsCount) }})
+          📝 帖子
         </button>
         <button class="tab" :class="{ active: activeTab === 'favorites' }" @click="switchTab('favorites')">
-          ⭐ 收藏 ({{ countsState === 'loading' ? '…' : displayCount(favoritesCount) }})
+          ⭐ 收藏
         </button>
         <button class="tab" :class="{ active: activeTab === 'friends' }" @click="switchTab('friends')">
-          👥 好友 ({{ countsState === 'loading' ? '…' : displayCount(friendsCount) }})
+          👥 好友
         </button>
       </nav>
 
@@ -433,13 +430,12 @@ async function loadThemeState() {
 
       <ForumList v-if="activeTab === 'threads'" kind="threads" :items="threads" :loading="threadsState === 'loading'"
         :page="threadsPage" :page-count="pageCountFor(threadsCount)" :total="threadsCount?.total ?? null"
-        :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无帖子"
-        @open="openInTab" @page-change="changeThreadsPage" />
+        :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无帖子" @open="openInTab" @page-change="changeThreadsPage" />
 
       <ForumList v-else-if="activeTab === 'favorites'" kind="favorites" :items="favorites"
         :loading="favoritesState === 'loading'" :page="favoritesPage" :page-count="pageCountFor(favoritesCount)"
-        :total="favoritesCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无收藏"
-        @open="openInTab" @page-change="changeFavoritesPage" />
+        :total="favoritesCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无收藏" @open="openInTab"
+        @page-change="changeFavoritesPage" />
 
       <ForumList v-else kind="friends" :items="friends" :loading="friendsState === 'loading'" :page="friendsPage"
         :page-count="pageCountFor(friendsCount)" :total="friendsCount?.total ?? null" :page-size="DEFAULT_PAGE_SIZE"
