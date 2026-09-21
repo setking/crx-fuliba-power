@@ -236,6 +236,13 @@ sidepanel.App.vue
 
 `type.ts` 里两个接口都声明了 `pages: number | null`，明确语义："Discuz .pg 分页条的'共 X 页'解析出的总页数；firstBatchSize / total 不可靠时优先用它"。侧栏构造 `ForumCount` 字面量时统一带 `pages: null`（fetch 返回后回填真实值）。
 
+### targetItemsForPage：不要用 count.total 截断（v1.0.12）
+
+- 现象：v1.0.11 修了 `view=me` 后，收藏页 page=2 翻页列表还是空的（debug 日志显示 `loadFavorites target=20 cache.items.length=20` → `ensureCached while?=false` → 不发请求）
+- 根因：`targetItemsForPage` 用 `Math.min(count.total, page*pageSize)` 截断 target。收藏页 `.tbmu` 解析不到真实总数，`loadFavorites` 末尾会把 `cache.items.length`（已加载条数，不是真实总数）写进 `favoritesCount.total` 兜底 → page=2 时 `Math.min(20, 40) = 20`，target 不够
+- 修复：target 只用 `count.pages`（或 page×pageSize）作上限，不读 `count.total` —— 因为 pageCountFor 已经把 page clamp 到 ≤ pages，不可能拉超页
+- 副作用：`loadFavorites` 末尾写的 `favoritesCount.total` 不再被 target 计算用到（仍是错的「已加载条数」），后续可以单独清理
+
 ## 协作约定
 
 项目内有完整的 AI 协作约定文件 [CLAUDE.md](./CLAUDE.md)，涵盖：

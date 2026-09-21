@@ -41,8 +41,19 @@ const favoritesPage = ref(1)
 const friendsPage = ref(1)
 
 function targetItemsForPage(page: number, count: ForumCount | null): number {
+  // 目标：保证「第 page 页」所需的累计条数到齐。
+  // - 有真实 pages: 取 min(pages*pageSize, page*pageSize) —— 不会拉超出页数的条目
+  // - 没 pages: 直接 page*pageSize（按默认分页大小估）
+  //
+  // 不能用 count.total 截断：loadFavorites 末尾会把 cache.items.length 写进
+  // favoritesCount.total 兜底，但 cache.items.length 实际只是「已加载」不是「真实总数」。
+  // 当真实总数解析不到（收藏页 .tbmu 没有），total = cache.items.length = 20，
+  // page=2 时 Math.min(20, 40) = 20 → ensureCached 不进 while → 翻页列表变空。
   const normalizedPage = Math.max(1, page)
-  return Math.min(totalFor(count) ?? normalizedPage * DEFAULT_PAGE_SIZE, normalizedPage * DEFAULT_PAGE_SIZE)
+  if (count?.pages != null && count.pages > 0) {
+    return Math.min(count.pages * DEFAULT_PAGE_SIZE, normalizedPage * DEFAULT_PAGE_SIZE)
+  }
+  return normalizedPage * DEFAULT_PAGE_SIZE
 }
 
 const threads = computed(() => itemsForDisplayPage(threadsCache.value.items, threadsPage.value))
