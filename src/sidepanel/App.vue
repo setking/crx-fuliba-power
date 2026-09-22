@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, type Ref } from 'vue'
-import { DEFAULT_PAGE_SIZE, MESSAGE_TYPES } from '@/global'
+// DEFAULT_PAGE_SIZE / FLOAT_BTN_HIDDEN_KEY / MESSAGE_TYPES / SIDEPANEL_ALIVE_PORT 都在下方主体中使用
+import { DEFAULT_PAGE_SIZE, FLOAT_BTN_HIDDEN_KEY, MESSAGE_TYPES, SIDEPANEL_ALIVE_PORT } from '@/global'
 import type { Favorite, ForumCount, ForumCounts, ForumTab, Friend, LoginStatus, Thread } from '@/type'
 import ForumList from '@/sidepanel/components/ForumList.vue'
 import ImageHostView from '@/sidepanel/components/ImageHostView.vue'
 import SearchView from '@/sidepanel/components/SearchView.vue'
+// fetchViaContent / getActiveTab / createRequestCache / getPageCount / getRequestPageCount / itemsForDisplayPage / normalizePage / type RequestCache / ensureStorageReady / FORUM_THEME_KEY / effectiveTheme 都在下方主体使用
 import { fetchViaContent, getActiveTab } from '@/utils/extension'
 import { createRequestCache, getPageCount, getRequestPageCount, itemsForDisplayPage, normalizePage, type RequestCache } from '@/utils/pagination'
+import { ensureStorageReady } from '@/utils/storage-init'
 import { FORUM_THEME_KEY, effectiveTheme } from '@/utils/theme'
 import type { ForumTheme } from '@/type'
 import userIcon from '@/assets/user.svg'
@@ -43,17 +46,23 @@ const friendsPage = ref(1)
 function targetItemsForPage(page: number, count: ForumCount | null): number {
   // 目标：保证「第 page 页」所需的累计条数到齐。
   // - 有真实 pages: 取 min(pages*pageSize, page*pageSize) —— 不会拉超出页数的条目
-  // - 没 pages: 直接 page*pageSize（按默认分页大小估）
+  // - 没 pages: 用 page * count.pageSize（已 parseDocumentPageSize 修过、能拿真实 pageSize），
+  //   没 pageSize 时 fallback DEFAULT_PAGE_SIZE
+  //
+  // 关键：用 count.pageSize 而不是 DEFAULT_PAGE_SIZE —— 用户改过每页数时，
+  // count.pageSize 反映「这一页实际展示数」，用它算 target 不会拉多余的 page=2。
+  // 数据少到不渲染 .pg（pages=null）但 pageSize 从 items 数拿到时也走这条路径。
   //
   // 不能用 count.total 截断：loadList 末尾会把 cache.items.length 写进
   // count.total 兜底，但 cache.items.length 实际只是「已加载」不是「真实总数」。
   // 当真实总数解析不到（收藏页 .tbmu 没有），total = cache.items.length = 20，
   // page=2 时 Math.min(20, 40) = 20 → ensureCached 不进 while → 翻页列表变空。
   const normalizedPage = Math.max(1, page)
+  const effectivePageSize = count?.pageSize ?? DEFAULT_PAGE_SIZE
   if (count?.pages != null && count.pages > 0) {
-    return Math.min(count.pages * DEFAULT_PAGE_SIZE, normalizedPage * DEFAULT_PAGE_SIZE)
+    return Math.min(count.pages * effectivePageSize, normalizedPage * effectivePageSize)
   }
-  return normalizedPage * DEFAULT_PAGE_SIZE
+  return normalizedPage * effectivePageSize
 }
 
 const threads = computed(() => itemsForDisplayPage(threadsCache.value.items, threadsPage.value))
@@ -146,6 +155,27 @@ function pageCountFor(count: ForumCount | null): number {
 }
 
 
+/** page>1 拿到 0 条很可能是论坛服务端临时问题（cookie / 缓存 / 参数顺序等
+ * 不明原因，v1.0.10 提交注释里有详细复现），不是真的到末尾。
+ *
+ * 策略：静默重试 3 次，间隔指数退避（200ms / 400ms / 800ms）。
+ * - 重试期间 UI 保持「加载中」状态不闪错误提示，覆盖绝大多数瞬时失败
+ * - 仍失败才抛错，让用户知道「确实出问题了」而不是无脑刷下去
+ * - 不污染 cache.reachedEnd：失败时 nextRequestPage 也不递增，下次用户
+ *   再点同页能从同一位置继续重试
+ * - page=1 拿到 0 条仍视为「真的没数据」立即设 reachedEnd=true，避免无谓重试 */
+async function fetchPageWithRetry<T>(page: number, messageType: string): Promise<T[]> {
+  const delays = [0, 200, 400, 800]
+  for (const delay of delays) {
+    if (delay > 0) await new Promise(r => setTimeout(r, delay))
+    const items = await fetchViaContent<T[]>(activeTabId.value!, messageType, { page })
+    if (items.length > 0) return items
+    // page=1 拿 0 条视为真末尾，不重试
+    if (page === 1) return items
+  }
+  return []
+}
+
 async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, messageType: string): Promise<void> {
   if (!activeTabId.value) throw new Error('找不到当前标签页')
 
@@ -161,16 +191,17 @@ async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, mess
       && cache.items.length < targetCount
     ) {
       const page = cache.nextRequestPage
-      const items = await fetchViaContent<T[]>(activeTabId.value, messageType, { page })
-      cache.nextRequestPage = page + 1
+      const items = await fetchPageWithRetry<T>(page, messageType)
+      // 成功才递增 nextRequestPage —— 重试全失败时 page 不前进，
+      // 下次用户点同页能从同一 page 继续（不会跳过中间页）
+      if (items.length > 0) {
+        cache.nextRequestPage = page + 1
+      }
       requestedPages += 1
 
-      // page>1 拿到 0 条很可能是服务器端问题（cookie/缓存/参数顺序），
-      // 不是真的到末尾。直接抛错让 UI 显示加载失败、不要污染 cache.reachedEnd。
-      // page=1 拿到 0 条则视为「真的没数据」，保留 reachedEnd=true 以便后续翻页正确处理。
       if (items.length === 0) {
         if (page > 1) {
-          throw new Error(`第 ${page} 页返回 0 条数据，可能是论坛分页参数失效，请刷新重试`)
+          throw new Error(`第 ${page} 页连续 4 次返回 0 条数据，可能是论坛临时异常，请稍后再试`)
         }
         cache.reachedEnd = true
         break
@@ -331,7 +362,42 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
   applyEffectiveTheme()
 }
 
+/** 通知 content 端浮动按钮显隐。
+ * 同步触发即可 —— chrome.storage.session.set 的写入动作是即时的，Promise resolve
+ * 在 pagehide 期间不保证完成，但写入本身能落盘（直到浏览器关）。
+ * session 级存储：浏览器关掉 / 扩展崩了 → 自动清空 → 不会跨会话 stale。
+ *
+ * 三处写 false 互相冗余但都有意义 —— 关 side panel 时 onUnmounted / pagehide /
+ * background port.onDisconnect 都会触发，触发顺序不一定，幂等写 false 都安全：
+ * - onUnmounted：Vue 销毁前的 hook，最常用路径
+ * - pagehide：w3c 页面销毁事件，Vue 销毁前触发
+ * - port.onDisconnect：background 端感知，最可靠但 SW 回收期间不立即跑
+ * 三条都保留以覆盖所有关闭场景。 */
+function setFloatBtnHidden(hidden: boolean): void {
+  chrome.storage.session.set({ [FLOAT_BTN_HIDDEN_KEY]: hidden })
+}
+
+/** pagehide 兜底：side panel document 销毁时先 pagehide 再 onUnmounted，
+ * 两条路径都写 false 幂等。 */
+function handlePageHide(): void {
+  setFloatBtnHidden(false)
+}
+
+/** side panel → background 长连接引用。background 在 onDisconnect 时写
+ * floatBtnHidden=false，是感知 ✕ 关 side panel 的最可靠手段（pagehide /
+ * onUnmounted 在 ✕ 关闭时不一定触发）。模块顶层 let 让 HMR / 重 mount 时
+ * 旧引用能自然被新 connect 覆盖。 */
+let alivePort: chrome.runtime.Port | null = null
+
 onMounted(async () => {
+  // 等 storage 默认值补齐后再读取（与 content 模块入口一致的"等服务就绪"约束）
+  try {
+    await ensureStorageReady()
+  }
+  catch (err) {
+    console.warn('[sidepanel] storage init 失败:', err)
+  }
+
   await loadThemeState()
   await probe()
 
@@ -340,11 +406,26 @@ onMounted(async () => {
     await loadThreads()
   }
 
+  // 建立长连接 —— background onDisconnect 监听这个 port 来感知 side panel 销毁
+  alivePort = chrome.runtime.connect({ name: SIDEPANEL_ALIVE_PORT })
+
   chrome.storage.onChanged.addListener(handleStorageChange)
+  window.addEventListener('pagehide', handlePageHide)
+  // mount 完成、port 建好后再写 true —— content 端 listener 用新注册的 listener 接收事件。
+  // 写 true 是触发 content 端按钮隐藏的唯一来源；background 不会主动写。
+  setFloatBtnHidden(true)
 })
 
 onUnmounted(() => {
+  // 显式 disconnect 让 background 立刻知道（某些 onUnmounted 触发的场景）——
+  // ✕ 关闭 case 会让 port 自然断开，两条路径都覆盖。
+  // 不用置 alivePort = null：onUnmounted 一次性执行，整个 side panel context 随即销毁，
+  // 模块级 let 变量随 GC。模块顶层 let 的意义只是让 HMR / 重 mount 时旧引用被新 connect 覆盖。
+  alivePort?.disconnect()
+
   chrome.storage.onChanged.removeListener(handleStorageChange)
+  window.removeEventListener('pagehide', handlePageHide)
+  setFloatBtnHidden(false)
 })
 
 // ============ 主题状态 ============

@@ -17,17 +17,23 @@
  * 详见 CLAUDE.md §6.7。
  */
 
+// FORUM_THEME_KEY / readForumTheme / resolveAutoTheme / ensureStorageReady / safeLocalSet 都在下方主体使用
 import { FORUM_THEME_KEY, readForumTheme, resolveAutoTheme } from '@/utils/theme'
+import { ensureStorageReady, safeLocalSet } from '@/utils/storage-init'
 
-/** 把当前主题写入 chrome.storage.local。'unknown' 不写（让 sidepanel 保持上次值）。 */
+/** 把当前主题写入 chrome.storage.local。'unknown' 不写（让 sidepanel 保持上次值）。
+ * safeLocalSet 内部 try/catch —— content script 偶发 "Access to storage is not allowed
+ * from this context" 时静默吞错（下次主题变化/MutationObserver 重触发时再写）。 */
 async function broadcast(): Promise<void> {
   const raw = readForumTheme()
   const resolved: 'dark' | 'light' = (raw === 'dark' || raw === 'light') ? raw : resolveAutoTheme()
-  await chrome.storage.local.set({ [FORUM_THEME_KEY]: resolved })
+  await safeLocalSet({ [FORUM_THEME_KEY]: resolved })
 }
 
 /** 启动主题监听器；启动时立即广播一次。 */
 export async function enableForumThemeWatcher(): Promise<void> {
+  // 等 storage 默认值补齐后再写 forumTheme，避免与 init 的写竞态
+  await ensureStorageReady()
   await broadcast()
 
   // 1. 同 tab 切换：dux 主题切完后会改 `<html data-dztheme>`，MutationObserver 抓住

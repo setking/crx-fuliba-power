@@ -7,9 +7,11 @@
  * 不依赖 Vue / DOM 副作用之外的全局状态（除 chrome.storage / console）
  */
 
+// AUTO_CHECKIN_ENABLED_KEY / MESSAGE_TYPES / getLoginHint / isLoggedIn / hasCheckedInToday / isCheckinCompletedLabel / markCheckedInToday / shouldSkipAutoCheckin / ensureStorageReady / safeLocalGet 都在下方主体使用
 import { MESSAGE_TYPES } from '@/global'
 import { getLoginHint, isLoggedIn } from '@/utils/auth'
-import { hasCheckedInToday, isCheckinCompletedLabel, markCheckedInToday, shouldSkipAutoCheckin } from '@/utils/checkin'
+import { AUTO_CHECKIN_ENABLED_KEY, hasCheckedInToday, isCheckinCompletedLabel, markCheckedInToday, shouldSkipAutoCheckin } from '@/utils/checkin'
+import { ensureStorageReady, safeLocalGet } from '@/utils/storage-init'
 
 // 备选 ID（Discuz 不同版本/插件 ID 不一样，按顺序尝试）
 const CHECKIN_BTN_IDS = ['fx_checkin_topb', 'fx_checkin', 'signin', 'checkin', 'hd_sign']
@@ -106,7 +108,15 @@ export function triggerCheckin(): { ok: boolean, msg: string } {
 
 /** 自动签到主流程 */
 export async function autoCheckin(): Promise<void> {
-  const { autoCheckinEnabled } = await chrome.storage.local.get('autoCheckinEnabled')
+  // 等 storage 默认值补齐后再读取 autoCheckinEnabled —— 避免首次安装时读到 undefined 误判
+  await ensureStorageReady()
+
+  // safeLocalGet：content script 上下文偶发 "Access to storage is not allowed from this context"，
+  // 失败返回 { autoCheckinEnabled: undefined } —— 不阻断后续读不到时的回退逻辑（默认 true）。
+  const { [AUTO_CHECKIN_ENABLED_KEY]: autoCheckinEnabled } = await safeLocalGet(
+    AUTO_CHECKIN_ENABLED_KEY,
+    { [AUTO_CHECKIN_ENABLED_KEY]: true },
+  )
   if (autoCheckinEnabled === false) return
 
   const host = location.hostname

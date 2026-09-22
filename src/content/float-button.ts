@@ -8,7 +8,9 @@
  * 入口：mountFloatButton() —— 在白名单站点页面加载完成后调用
  */
 
-import { MESSAGE_TYPES } from '@/global'
+// FLOAT_BTN_HIDDEN_KEY / MESSAGE_TYPES / ensureStorageReady / safeSessionGet 都在下方主体使用
+import { FLOAT_BTN_HIDDEN_KEY, MESSAGE_TYPES } from '@/global'
+import { ensureStorageReady, safeSessionGet } from '@/utils/storage-init'
 
 const FLOAT_BTN_POSITION_KEY = 'floatBtnPosition'
 const DRAG_THRESHOLD = 5 // 移动超过 5px 才算拖拽
@@ -70,6 +72,9 @@ const FLOAT_BTN_BASE_CSS = [
 ].join('; ')
 
 export async function mountFloatButton(): Promise<void> {
+  // 等 storage 默认值补齐后再读取 session[FLOAT_BTN_HIDDEN_KEY]，避免冷启时读到 undefined 误判为隐藏
+  await ensureStorageReady()
+
   // 清理任何遗留的旧按钮（HMR / 重新注入会再次执行）
   document.querySelectorAll('#crxjs-float-btn').forEach(el => el.remove())
 
@@ -82,6 +87,41 @@ export async function mountFloatButton(): Promise<void> {
 
   const saved = await loadBtnPosition()
   applyPosition(btn, saved)
+
+  // 启动时同步 side panel 状态：side panel 在另一 tab 开着 / 用户刚关扩展重开时
+  // storage 里可能已有 true，避免按钮挡住一个看不见的 side panel。
+  // 用 chrome.storage.session 而非 local —— 浏览器关掉自动清空，避免崩溃 / 强杀进程后
+  // 残留 stale 值导致冷启按钮被错误隐藏。
+  //
+  // 关键：listener 必须先注册、再读初始值。
+  // 否则会有竞态窗口 —— read 拿到 true → 隐藏按钮，紧接着另一侧 panel 关闭写入
+  // false（hidden: true→false），onChanged 触发，但 listener 还没注册 → 按钮永久
+  // 停留在 display:none，即使 storage 里已经是 false 也无法恢复显示。
+  // 先注册 listener 后再 read 即可：若 read 期间值变了，listener 能覆盖初始设置的状态。
+  const applyHidden = (hidden: boolean) => {
+    btn.style.display = hidden ? 'none' : ''
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'session' || !(FLOAT_BTN_HIDDEN_KEY in changes)) return
+    // listener 内查询 DOM —— 应对 SPA 导航 / 重新注入的场景：同一会话内可能被
+    // 多次 mount，每次都创建新 btn + 新 listener。旧 listener 仍持有旧 btn 引用
+    // （旧 btn 已从 DOM 移除，无视觉效果），但用 querySelector 也能稳定拿到当前 btn。
+    const cur = document.getElementById('crxjs-float-btn')
+    if (!cur) return
+    // newValue 可能是 true / false / undefined（key 被删如 session 清空）：
+    // 只有严格等于 true 才隐藏，其余（false / undefined）一律显示。
+    const hidden = changes[FLOAT_BTN_HIDDEN_KEY].newValue === true
+    cur.style.display = hidden ? 'none' : ''
+  })
+
+  // safeSessionGet：content script 上下文偶发 "Access to storage is not allowed from this context"，
+  // 失败返回 { floatBtnHidden: undefined } —— applyHidden 会按"未隐藏"显示按钮。
+  const hiddenInitial = await safeSessionGet(
+    FLOAT_BTN_HIDDEN_KEY,
+    { [FLOAT_BTN_HIDDEN_KEY]: false },
+  )
+  applyHidden(hiddenInitial[FLOAT_BTN_HIDDEN_KEY] === true)
 
   // 拖拽状态
   let dragging = false

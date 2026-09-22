@@ -11,6 +11,7 @@
  * 入口：enableBjxTransform() —— 在 isArticlePage() 命中时调用
  */
 
+// BJX_AUTO_PREVIEW_KEY / BJX_PROCESSED_ATTR / BJX_RESULT_CLASS / type PreviewState / WhatslinkInfo / bjxToMagnet / findBjxInText / findHexHashInText / findMagnetInText / hexToMagnet / isWhiteStyleLink / parseBjxYoutubeChannel / parseYoutubeWatchId / isArticlePage / applyPanelTheme / buildThemedStyle / markThemedHost / ensureStorageReady / safeLocalGet / buildFullMagnet / fetchWhatslinkInfo / formatSize 都在下方主体使用
 import { BJX_AUTO_PREVIEW_KEY, BJX_PROCESSED_ATTR, BJX_RESULT_CLASS } from '@/global'
 import type { PreviewState, WhatslinkInfo } from '@/type'
 import {
@@ -25,6 +26,7 @@ import {
 } from '@/utils/bjx'
 import { isArticlePage } from '@/utils/hidden-links'
 import { applyPanelTheme, buildThemedStyle, markThemedHost } from '@/utils/panel-theme'
+import { ensureStorageReady, safeLocalGet } from '@/utils/storage-init'
 import { buildFullMagnet, fetchWhatslinkInfo, formatSize } from '@/utils/whatslink'
 
 const BJX_RESULT_BASE_CSS = [
@@ -546,10 +548,15 @@ function warmMagnetCache(magnet: string): void {
 
 /** 等待帖子楼层 / 文章正文出现后启动转换；后续用 MutationObserver 跟进新增节点 */
 export async function enableBjxTransform(): Promise<void> {
+  // 等 storage 默认值补齐后再读取 BJX_AUTO_PREVIEW_KEY —— 默认 true 已写入，避免读到 undefined 误判
+  await ensureStorageReady()
+
   await waitForArticleRoot()
 
   // 读一次"自动预览"开关；后续通过 chrome.storage.onChanged 跟进（用户在 popup 切换时立即生效）。
-  const stored = await chrome.storage.local.get([BJX_AUTO_PREVIEW_KEY])
+  // safeLocalGet：content script 上下文偶发 "Access to storage is not allowed from this context"，
+  // 失败返回 { bjxAutoPreview: true } —— 与默认开启语义对齐。
+  const stored = await safeLocalGet(BJX_AUTO_PREVIEW_KEY, { [BJX_AUTO_PREVIEW_KEY]: true })
   bjxAutoPreview = stored[BJX_AUTO_PREVIEW_KEY] !== false // 默认开启
 
   // 关掉时顺手 disconnect 已挂的 observer，避免对旧按钮继续预热
