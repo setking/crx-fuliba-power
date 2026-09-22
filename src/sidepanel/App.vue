@@ -155,25 +155,14 @@ function pageCountFor(count: ForumCount | null): number {
 }
 
 
-/** page>1 拿到 0 条很可能是论坛服务端临时问题（cookie / 缓存 / 参数顺序等
- * 不明原因，v1.0.10 提交注释里有详细复现），不是真的到末尾。
+/** 拉一页数据。
  *
- * 策略：静默重试 3 次，间隔指数退避（200ms / 400ms / 800ms）。
- * - 重试期间 UI 保持「加载中」状态不闪错误提示，覆盖绝大多数瞬时失败
- * - 仍失败才抛错，让用户知道「确实出问题了」而不是无脑刷下去
- * - 不污染 cache.reachedEnd：失败时 nextRequestPage 也不递增，下次用户
- *   再点同页能从同一位置继续重试
- * - page=1 拿到 0 条仍视为「真的没数据」立即设 reachedEnd=true，避免无谓重试 */
-async function fetchPageWithRetry<T>(page: number, messageType: string): Promise<T[]> {
-  const delays = [0, 200, 400, 800]
-  for (const delay of delays) {
-    if (delay > 0) await new Promise(r => setTimeout(r, delay))
-    const items = await fetchViaContent<T[]>(activeTabId.value!, messageType, { page })
-    if (items.length > 0) return items
-    // page=1 拿 0 条视为真末尾，不重试
-    if (page === 1) return items
-  }
-  return []
+ * 约定：返回 0 条 = 「这一页就是没有数据」 = `reachedEnd=true`。
+ * 不抛错、不重试、不区分 page=1 还是 page>1 —— 调用方拿 0 条一律视为末尾。
+ * 只有 fetchViaContent 自身抛错（HTTP 错误 / content script 未注入等真异常）
+ * 才会向上冒泡到 loadList → UI 显示「加载{label}失败：…」。 */
+async function fetchPage<T>(page: number, messageType: string): Promise<T[]> {
+  return fetchViaContent<T[]>(activeTabId.value!, messageType, { page })
 }
 
 async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, messageType: string): Promise<void> {
@@ -191,18 +180,17 @@ async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, mess
       && cache.items.length < targetCount
     ) {
       const page = cache.nextRequestPage
-      const items = await fetchPageWithRetry<T>(page, messageType)
-      // 成功才递增 nextRequestPage —— 重试全失败时 page 不前进，
-      // 下次用户点同页能从同一 page 继续（不会跳过中间页）
-      if (items.length > 0) {
-        cache.nextRequestPage = page + 1
-      }
+      const items = await fetchPage<T>(page, messageType)
+      cache.nextRequestPage = page + 1
       requestedPages += 1
 
+      // 0 条 = 末尾：不论 page=1 还是 page>1。
+      // 早前 v1.0.10/v1.0.15 试图对 page>1 抛错或重试，但用户体验不好：
+      // - 重试让正常翻页也要等 ~1.5s 才渲染
+      // - 抛错让用户以为扩展坏了，实际论坛 page>1 偶发 0 条是已知常态
+      // 现在统一按「服务端返回啥就信啥」处理 —— 0 条直接结束，后续翻页由
+      // reachedEnd 自然兜住，UI 永远显示「已加载 N 条」而不闪错误。
       if (items.length === 0) {
-        if (page > 1) {
-          throw new Error(`第 ${page} 页连续 4 次返回 0 条数据，可能是论坛临时异常，请稍后再试`)
-        }
         cache.reachedEnd = true
         break
       }
