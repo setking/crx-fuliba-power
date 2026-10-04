@@ -21,7 +21,7 @@ when_not_to_use: 调整论坛抓取逻辑（→ forum-scraping）；调整消息
 
 ```ts
 // src/global.ts
-export const ENABLED_SITES = ['fuliba2025.net', 'www.wnflb2023.com'] as const
+export const ENABLED_SITES = ['fuliba2025.net', 'fuliba2023.net', 'www.wnflb2023.com'] as const
 export const FLOAT_BUTTON_HOSTS = ['www.wnflb2023.com'] as const
 export const UPLOAD_HOST = 'tu.wnflb2023.com'
 ```

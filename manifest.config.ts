@@ -1,6 +1,6 @@
 import { defineManifest } from '@crxjs/vite-plugin'
 import pkg from './package.json' with { type: 'json' }
-import { ENABLED_SITES, UPLOAD_HOST } from './src/global'
+import { ENABLED_SITES, UPLOAD_HOST } from './src/global.ts'
 
 export default defineManifest({
   manifest_version: 3,

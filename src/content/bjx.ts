@@ -268,15 +268,19 @@ async function handlePreviewClick(
   button.disabled = true
   button.textContent = '⏳ 查询中...'
 
-  // 二级面板挂在 button 之后的同一行尾
-  const panelHost = document.createElement('span')
-  panelHost.style.cssText = 'display: block !important;'
-  button.insertAdjacentElement('afterend', panelHost)
-  panelHost.appendChild(renderPreviewPanel('loading', null, null, () => { /* no-op until done */ }, magnet))
+  // 重试幂等：若按钮后已挂过面板（data-bjx-panel-host 是上一轮插入的标记），
+  // 直接复用，不重复 append —— 否则多次重试会堆出一排 ❌ 失败提示。
+  let panelHost = button.nextElementSibling as HTMLElement | null
+  if (!panelHost || panelHost.dataset.bjxPanelHost !== magnet) {
+    panelHost = document.createElement('span')
+    panelHost.dataset.bjxPanelHost = magnet
+    panelHost.style.cssText = 'display: block !important;'
+    button.insertAdjacentElement('afterend', panelHost)
+  }
+  panelHost.replaceChildren(renderPreviewPanel('loading', null, null, () => { /* no-op until done */ }, magnet))
 
   try {
     const info = await fetchWhatslinkInfo(magnet)
-    panelHost.innerHTML = ''
     const onScreenshots = () => {
       // 把"查看截图"按钮替换成缩略图（不能 querySelector('button') —— 那会拿到上面的"复制"按钮）。
       const panelEl = panelHost.querySelector('div')
@@ -285,13 +289,12 @@ async function handlePreviewClick(
       if (btnInPanel) btnInPanel.remove()
       renderScreenshots(panelEl, info.screenshots)
     }
-    panelHost.appendChild(renderPreviewPanel('done', info, null, onScreenshots, magnet))
+    panelHost.replaceChildren(renderPreviewPanel('done', info, null, onScreenshots, magnet))
     button.textContent = '✓ 已预览'
   }
   catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    panelHost.innerHTML = ''
-    panelHost.appendChild(renderPreviewPanel('error', null, msg, () => { /* no-op */ }, magnet))
+    panelHost.replaceChildren(renderPreviewPanel('error', null, msg, () => { /* no-op */ }, magnet))
     button.textContent = '🔄 重试'
     button.disabled = false
   }

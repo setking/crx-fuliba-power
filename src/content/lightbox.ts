@@ -3,11 +3,13 @@
  *
  * 需求背景：Discuz / WordPress 正文里点 <img> 默认跳新标签页打开原图。
  * 用户实际意图只是「看大图」，跳走打断阅读；多张图没有前后翻页入口。
- * 同时帖子也会内嵌 <video> 与 外站 iframe（B站/油管），应当一并能在 lightbox 里播放。
+ * 同时帖子也会内嵌 <video>，应当一并能在 lightbox 里播放。
+ * iframe / embed（b站 / youtube / flash）不再纳入轮播：高度按 150px 很难看，且 Discuz
+ * `[media]` 标签把 iframe 包在 <a target="_blank"> 里，劫持与跳新标签页会冲突。
  *
  * 实现：
  * - 用 document 级事件代理捕获点击事件，找到 article.article-content / td.t_f / .pattl / .pcb / .message
- *   内的 <img> / <video> / <iframe> / <embed> 就劫持
+ *   内的 <img> / <video> 就劫持
  * - 鼠标中键 / Ctrl|Cmd|Shift+Click 放行，保留「中键开新标签」习惯
  * - 弹一个 ShadowRoot 模态层挂在 body 末尾（不在正文容器内，避免论坛 SPA 重写时一起被删）
  * - 模态里：遮罩 + 媒体容器 + 工具栏（prev / zoom- / rotate-ccw / reset / rotate-cw / zoom+ / next）
@@ -15,7 +17,6 @@
  * - 键盘：← → Esc Home End；Space 在 video 上切换暂停/播放
  * - 鼠标：图片支持拖拽平移 + 滚轮缩放 + 双击「适应屏 ↔ 100% 原图」，点击遮罩关闭，点击媒体本身不关闭
  * - 视频：保留原生 controls；缩放/旋转/重置按钮 disable（缩放视频控件会破坏布局）
- * - iframe/embed：固定 max-95vw/95vh，无缩放；与图片混排在轮播里
  * - SVG（<img src=*.svg> 或内嵌 <svg>）跳过 —— 不劫持不进轮播
  * - 切换图片时立刻 `new Image().src = nextSrc` 预加载，complete 后切 src，避免空白闪烁
  * - scale / rotation / offset 在切换图片时保留；「重置」按钮一键归零
@@ -29,6 +30,7 @@
  * 入口：enableLightbox() —— 在 isLightboxSite() && isViewthreadPage() 命中时调用。
  */
 
+// applyPanelTheme / buildThemedStyle / markThemedHost 都在下方主体使用
 import { applyPanelTheme, buildThemedStyle, markThemedHost } from '@/utils/panel-theme'
 
 /** 模态 host 在 DOM 上挂的标记 —— 用来去重（同一个 content script 实例只挂一份） */
@@ -40,6 +42,12 @@ const LIGHTBOX_HOST_ATTR = 'data-crxjs-lightbox'
  *  - .pattl：Discuz 帖子正文底部的「附件列表」容器，内嵌 ignore_js_op/dl.tattl 附件图
  *  - .pcb / .message：Discuz 楼中层 / 回复内容容器 */
 const ARTICLE_ROOT_SELECTOR = 'article.article-content, .article-content, td.t_f[id^="postmessage_"], .pattl, .pcb, .message'
+
+/** Discuz 帖子楼层右半容器（包裹 td.t_f + .pattl + .pcb 等）。
+ * 当点视频（root=td.t_f）或点附件图（root=.pattl）时，把 root 提升到 td.plc，
+ * 让正文 + 附件里的所有图视频合并到同一个轮播列表。Discuz 一楼一层共用一个 td.plc，
+ * 跨楼层不会串扰。 */
+const DISCUZ_POST_CELL_SELECTOR = 'td.plc'
 
 /** 拖拽判定阈值：mousedown 到 mouseup 之间移动 < 5px 才视为 click（点击遮罩/图片用） */
 const CLICK_DRAG_THRESHOLD_PX = 5
@@ -58,13 +66,12 @@ type Rotation = 0 | 90 | 180 | 270
 type LightboxImage =
   | { kind: 'image'; src: string }
   | { kind: 'video'; src: string; poster?: string }
-  | { kind: 'embed'; src: string }
 
 /** 当前打开的模态实例（只允许同时一个） */
 interface OpenState {
   host: HTMLElement
   shadow: ShadowRoot
-  /** 当前媒体容器（图片 <img> / <video> / <iframe>），每次 goTo 替换 */
+  /** 当前媒体容器（图片 <img> / 视频 <video>），每次 goTo 替换 */
   media: HTMLElement
   counter: HTMLElement
   prevBtn: HTMLButtonElement
@@ -75,7 +82,7 @@ interface OpenState {
   rotateCcwBtn: HTMLButtonElement
   rotateCwBtn: HTMLButtonElement
   resetBtn: HTMLButtonElement
-  /** 底部工具栏容器：视频 / 嵌入时整组淡出 + 下沉，避免遮挡视频控制区 */
+  /** 底部工具栏容器：视频时整组淡出 + 下沉，避免遮挡视频控制区 */
   toolbar: HTMLElement
   mask: HTMLElement
   wrap: HTMLElement
@@ -150,6 +157,19 @@ function isInsideArticleRoot(el: Element): HTMLElement | null {
   return el.closest<HTMLElement>(ARTICLE_ROOT_SELECTOR)
 }
 
+/** 帖子正文相关白名单（root 提升到 td.plc 后用来过滤 td.plc 内的装饰图）：
+ *  - td.t_f[id^="postmessage_"]：楼层正文
+ *  - .pattl：附件列表
+ *  - .pcb：正文容器（含回复区的 .message 也走这条 root 分支不参与提升）
+ * 头像（.avtm / uc_server/avatar.php）、在线图标（static/image/common）、签名（.sign）
+ * 等 td.plc 内的装饰元素无任何上述祖先，会被 collectImagesFromRoot 跳过。 */
+const POST_BODY_ANCESTOR_SELECTOR = 'td.t_f[id^="postmessage_"], .pattl, .pcb'
+
+/** 检查 media 是否落在「帖子正文相关容器」内，用于 root 提升到 td.plc 后过滤装饰图。 */
+function isInsideDiscuzPostBody(el: Element): HTMLElement | null {
+  return el.closest<HTMLElement>(POST_BODY_ANCESTOR_SELECTOR)
+}
+
 /** 判断 src 是否为 SVG —— 不劫持 SVG 图 */
 function isSvgUrl(src: string): boolean {
   if (!src) return false
@@ -205,12 +225,7 @@ function readVideoMedia(video: HTMLVideoElement): { src: string; poster: string 
   return { src, poster }
 }
 
-/** 从 iframe / embed 抽 src */
-function readEmbedSrc(el: HTMLIFrameElement | HTMLEmbedElement): string {
-  return el.getAttribute('src') ?? ''
-}
-
-/** 把 root 内的 <img>/<video>/<iframe>/<embed> 收集成 LightboxImage[]。
+/** 把 root 内的 <img>/<video> 收集成 LightboxImage[]。
  * 跳过 SVG、跳过无 src、跳过纯装饰（width<40 & height<40 视情况保留，让用户自己滚轮播）。
  * 列表顺序按 DOM 顺序，便于左右翻页保持「阅读方向」。 */
 function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
@@ -223,55 +238,39 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
     return cached
   }
 
+  // 是否降级路径（root=td.plc 而非精确的 .t_fsz）：需要额外装饰过滤防御头像/签名
+  const isPlcFallback = root.tagName.toLowerCase() === 'td' && root.classList.contains('plc')
+
   const seen = new Set<string>()
   const result: LightboxImage[] = []
 
-  // 1. <img>
-  for (const img of Array.from(root.querySelectorAll<HTMLImageElement>('img'))) {
-    if (!isElementVisible(img)) continue
-    if (isWrappedInExternalLink(img)) continue
-    const raw = readImageSrc(img)
-    if (!raw) continue
-    if (isSvgUrl(raw)) continue
-    if (isForumStaticIcon(raw)) continue
-    const normalized = raw.split('#')[0] ?? raw
-    if (!normalized || seen.has(normalized)) continue
-    seen.add(normalized)
-    result.push({ kind: 'image', src: normalized })
-  }
-
-  // 2. <video>
-  for (const v of Array.from(root.querySelectorAll<HTMLVideoElement>('video'))) {
-    if (!isElementVisible(v)) continue
-    if (isWrappedInExternalLink(v)) continue
-    const { src, poster } = readVideoMedia(v)
-    if (!src) continue
-    const key = src.split('#')[0] ?? src
-    if (seen.has(key)) continue
-    seen.add(key)
-    result.push({ kind: 'video', src: key, poster: poster || undefined })
-  }
-
-  // 3. <iframe> / <embed>：B站 / YouTube / 优酷 / Discuz 视频插件常用
-  for (const f of Array.from(root.querySelectorAll<HTMLIFrameElement>('iframe'))) {
-    if (!isElementVisible(f)) continue
-    if (isWrappedInExternalLink(f)) continue
-    const src = readEmbedSrc(f)
-    if (!src) continue
-    const normalized = src.split('#')[0] ?? src
-    if (seen.has(normalized)) continue
-    seen.add(normalized)
-    result.push({ kind: 'embed', src: normalized })
-  }
-  for (const e of Array.from(root.querySelectorAll<HTMLEmbedElement>('embed'))) {
-    if (!isElementVisible(e)) continue
-    if (isWrappedInExternalLink(e)) continue
-    const src = readEmbedSrc(e)
-    if (!src) continue
-    const normalized = src.split('#')[0] ?? src
-    if (seen.has(normalized)) continue
-    seen.add(normalized)
-    result.push({ kind: 'embed', src: normalized })
+  // 合并两类媒体为单个 DOM 顺序遍历（而不是按类型分组），保证轮播列表与「阅读方向」一致：
+  // <td.t_f>video → <pattl>img×N> 应为 [video, img×N]，而不是 [img×N, video]。
+  // 单一 querySelectorAll('img, video') 按文档顺序产出节点；
+  // 按节点类型分发到对应 src 提取器，统一去重入 list。
+  // iframe / embed 不再收：b 站 / youtube 等外站 iframe 在 lightbox 内高度按 150px，
+  // 且 Discuz `[media]` 标签把 iframe 包在 <a target="_blank"> 里，点不到 lightbox 还会跳走。
+  for (const node of Array.from(root.querySelectorAll('img, video'))) {
+    if (!isElementVisible(node)) continue
+    if (isWrappedInExternalLink(node)) continue
+    if (isPlcFallback && !isInsideDiscuzPostBody(node)) continue
+    let item: LightboxImage | null = null
+    if (node instanceof HTMLImageElement) {
+      const raw = readImageSrc(node)
+      if (!raw || isSvgUrl(raw) || isForumStaticIcon(raw)) continue
+      const normalized = raw.split('#')[0] ?? raw
+      if (!normalized) continue
+      item = { kind: 'image', src: normalized }
+    }
+    else if (node instanceof HTMLVideoElement) {
+      const { src, poster } = readVideoMedia(node)
+      if (!src) continue
+      const key = src.split('#')[0] ?? src
+      item = { kind: 'video', src: key, poster: poster || undefined }
+    }
+    if (!item || seen.has(item.src)) continue
+    seen.add(item.src)
+    result.push(item)
   }
 
   rootImagesCache.set(root, result)
@@ -280,11 +279,14 @@ function collectImagesFromRoot(root: HTMLElement): LightboxImage[] {
   return result
 }
 
-/** 把单个 media 元素转成 LightboxImage；返回 null 表示忽略（SVG / 无 src / 已存在 / 祖先链不可见 / 被外站 <a> 包裹） */
-function mediaToLightboxImage(el: Element): LightboxImage | null {
+/** 把单个 media 元素转成 LightboxImage；返回 null 表示忽略（SVG / 无 src / 已存在 / 祖先链不可见 / 被外站 <a> 包裹）。
+ * root 可选：传入时若 root 是降级路径（td.plc）会同步检查装饰过滤。 */
+function mediaToLightboxImage(el: Element, root?: HTMLElement): LightboxImage | null {
   if (!isElementVisible(el)) return null
   // 被外站 <a> 包裹的图片：浏览器原生「点图开新标签去外站」应保留，不劫持
   if (isWrappedInExternalLink(el)) return null
+  // root 降级到 td.plc 时同步应用装饰过滤（与 collectImagesFromRoot 一致）
+  if (root && root.tagName.toLowerCase() === 'td' && root.classList.contains('plc') && !isInsideDiscuzPostBody(el)) return null
   if (el instanceof HTMLImageElement) {
     const src = readImageSrc(el)
     if (!src) return null
@@ -296,11 +298,6 @@ function mediaToLightboxImage(el: Element): LightboxImage | null {
     const { src } = readVideoMedia(el)
     if (!src) return null
     return { kind: 'video', src: src.split('#')[0] ?? src }
-  }
-  if (el instanceof HTMLIFrameElement || el instanceof HTMLEmbedElement) {
-    const src = readEmbedSrc(el)
-    if (!src) return null
-    return { kind: 'embed', src: src.split('#')[0] ?? src }
   }
   return null
 }
@@ -326,9 +323,11 @@ function appendIfNew(root: HTMLElement, item: LightboxImage): boolean {
 /** 对已缓存的 root 做一次「当前可见但首次扫时被过滤」的增量扫描并 append。
  * 复用四类 querySelectorAll 路径 + 可见性过滤。 */
 function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
+  const isPlcFallback = root.tagName.toLowerCase() === 'td' && root.classList.contains('plc')
   for (const img of Array.from(root.querySelectorAll<HTMLImageElement>('img'))) {
     if (!isElementVisible(img)) continue
     if (isWrappedInExternalLink(img)) continue
+    if (isPlcFallback && !isInsideDiscuzPostBody(img)) continue
     const raw = readImageSrc(img)
     if (!raw) continue
     if (isSvgUrl(raw)) continue
@@ -344,24 +343,12 @@ function syncNewlyVisible(root: HTMLElement, list: LightboxImage[]): void {
   for (const v of Array.from(root.querySelectorAll<HTMLVideoElement>('video'))) {
     if (!isElementVisible(v)) continue
     if (isWrappedInExternalLink(v)) continue
+    if (isPlcFallback && !isInsideDiscuzPostBody(v)) continue
     const { src, poster } = readVideoMedia(v)
     if (!src) continue
     const key = src.split('#')[0] ?? src
     if (!key) continue
     const item: LightboxImage = { kind: 'video', src: key, poster: poster || undefined }
-    if (!hasInList(list, item)) {
-      list.push(item)
-      if (openState && openState.images === list) updateOpenCounter()
-    }
-  }
-  for (const el of Array.from(root.querySelectorAll<HTMLIFrameElement | HTMLEmbedElement>('iframe, embed'))) {
-    if (!isElementVisible(el)) continue
-    if (isWrappedInExternalLink(el)) continue
-    const src = readEmbedSrc(el)
-    if (!src) continue
-    const normalized = src.split('#')[0] ?? src
-    if (!normalized) continue
-    const item: LightboxImage = { kind: 'embed', src: normalized }
     if (!hasInList(list, item)) {
       list.push(item)
       if (openState && openState.images === list) updateOpenCounter()
@@ -375,10 +362,12 @@ function updateOpenCounter(): void {
   const item = openState.images[openState.index]
   if (!openState) return
   openState.counter.textContent = item
-    ? `${openState.index + 1} / ${openState.images.length}${item.kind !== 'image' ? ` · ${item.kind === 'video' ? '视频' : '嵌入'}` : ''}`
+    ? `${openState.index + 1} / ${openState.images.length}${item.kind !== 'image' ? ' · 视频' : ''}`
     : `${openState.index + 1} / ${openState.images.length}`
-  openState.prevBtn.disabled = openState.images.length <= 1
-  openState.nextBtn.disabled = openState.images.length <= 1
+  // 单张时直接隐藏翻页按钮（按钮灰显会让用户以为是 bug），多张时始终启用，边界交给 goTo 范围检查
+  const hasMany = openState.images.length > 1
+  openState.prevBtn.hidden = !hasMany
+  openState.nextBtn.hidden = !hasMany
   // toolbar 整组淡入 / 淡出（与 mountLightbox 内部 updateCounter 同步），视频 / 嵌入时不遮挡
   openState.toolbar.classList.toggle('is-empty', !openState.currentTransformEl)
 }
@@ -398,8 +387,8 @@ function ensureRootObserver(root: HTMLElement): void {
       for (const node of Array.from(m.addedNodes)) {
         if (!(node instanceof Element)) continue
         // 节点自身
-        if (/^(img|video|iframe|embed)$/i.test(node.tagName) && !seen.has(node)) {
-          const item = mediaToLightboxImage(node)
+        if (/^(img|video)$/i.test(node.tagName) && !seen.has(node)) {
+          const item = mediaToLightboxImage(node, root)
           // mediaToLightboxImage 内部已做可见性检查；可见性失败时 item=null 且不应进 seen
           // —— 否则后续 display 切换后 observer 不会再检查它（display 变化不会触发 mutation）
           if (item) {
@@ -424,9 +413,9 @@ function ensureRootObserver(root: HTMLElement): void {
           // 用户开 lightbox 时通过 collectImagesFromRoot → syncNewlyVisible 补回
         }
         // 子树里新增的 media
-        for (const child of Array.from(node.querySelectorAll('img, video, iframe, embed'))) {
+        for (const child of Array.from(node.querySelectorAll('img, video'))) {
           if (seen.has(child)) continue
-          const item = mediaToLightboxImage(child)
+          const item = mediaToLightboxImage(child, root)
           // 同上：可见性失败时不标 seen，等下次 syncNewlyVisible 补
           if (!item) continue
           seen.add(child)
@@ -484,14 +473,35 @@ function shouldBypassClick(e: MouseEvent): boolean {
   return false
 }
 
-/** 点击元素是 <img> / <video> / <iframe> / <embed>，并匹配 LightboxImage */
+/** Discuz 楼层 root 提升：点视频 / 点附件图分别落在 td.t_f 与 .pattl 兄弟容器，
+ * 把 root 抬升到 `.t_fsz`（Discuz 帖子的正文 + 附件大容器，天然不含头像 / 签名等装饰元素）。
+ * 命中 .pcb（楼中楼）时通常找不到 .t_fsz，降级到 td.plc；后者由 collectImagesFromRoot
+ * 的双层防御（isInsideDiscuzPostBody + isForumStaticIcon）兜底过滤装饰图。 */
+function expandDiscuzPostRoot(root: HTMLElement): HTMLElement {
+  // 仅 Discuz 楼层相关 root 提升；WordPress / 回复区 root 保持原样
+  const tag = root.tagName.toLowerCase()
+  const isDiscuzFloorRoot = (tag === 'td' && root.classList.contains('t_f'))
+    || root.classList.contains('pattl')
+    || root.classList.contains('pcb')
+  if (!isDiscuzFloorRoot) return root
+  // 优先 .t_fsz（精确路径）：只含 td.t_f + .pattl 等真实正文+附件，无装饰元素
+  const tfsz = root.closest<HTMLElement>('.t_fsz')
+  if (tfsz) return tfsz
+  // 降级 td.plc：覆盖 .pcb（楼中楼）等非常规结构，靠 collectImagesFromRoot 装饰过滤兜底
+  const plc = root.closest<HTMLElement>(DISCUZ_POST_CELL_SELECTOR)
+  return plc ?? root
+}
+
+/** 点击元素是 <img> / <video>，并匹配 LightboxImage */
 function findClickableMedia(target: Element): { root: HTMLElement; item: LightboxImage; index: number; images: LightboxImage[] } | null {
-  const media = target.closest('img, video, iframe, embed')
+  const media = target.closest('img, video')
   if (!media) return null
   // 被外站 <a> 包裹的媒体：用户点图本意是开新标签去外站，不劫持，原生 <a> 自然触发跳转
   if (isWrappedInExternalLink(media)) return null
-  const root = isInsideArticleRoot(media)
-  if (!root) return null
+  const baseRoot = isInsideArticleRoot(media)
+  if (!baseRoot) return null
+  // Discuz 楼层把 root 提升到 td.plc，让正文视频 + 附件图合并到同一轮播
+  const root = expandDiscuzPostRoot(baseRoot)
   const images = collectImagesFromRoot(root)
   if (images.length === 0) return null
 
@@ -511,16 +521,11 @@ function findClickableMedia(target: Element): { root: HTMLElement; item: Lightbo
     index = images.findIndex(i => i.kind === 'video' && i.src === key)
     item = images[index]
   }
-  else if (media instanceof HTMLIFrameElement || media instanceof HTMLEmbedElement) {
-    const src = readEmbedSrc(media).split('#')[0] ?? ''
-    index = images.findIndex(i => i.kind === 'embed' && i.src === src)
-    item = images[index]
-  }
   if (!item || index < 0) return null
   return { root, item, index, images }
 }
 
-/** 点击正文内的 <img>/<video>/<iframe>/<embed> 时打开 lightbox */
+/** 点击正文内的 <img> / <video> 时打开 lightbox（iframe / embed 不再劫持，避免和外站跳转行为冲突） */
 function openLightboxFromMedia(target: Element): void {
   const hit = findClickableMedia(target)
   if (!hit) return
@@ -575,21 +580,13 @@ const LIGHTBOX_CSS = `
   cursor: grabbing;
   transition: none;
 }
-/* 视频 / iframe / embed：固定 max-w/h，无 transform */
-.lb-media-fixed {
-  display: block;
-  max-width: 95vw;
-  max-height: 95vh;
-  width: 90vw;
-  height: auto;
-  background: #000;
-  border: 0;
-}
+/* 视频：固定 max-w/h，无 transform；iframe / embed 已不再纳入 lightbox */
 .lb-video {
   display: block;
   max-width: 95vw;
   max-height: 95vh;
   width: 90vw;
+  height: 90vh;     /* video 默认 150px 高会给「宽 90vw × 高 1/10」效果，显式给 90vh 让控件可视 */
   background: #000;
   outline: none;
 }
@@ -754,7 +751,7 @@ const ICONS = {
   rotateRight: '<path d="M904.533333 537.6h-38.4c-8.533333 0-12.8 4.266667-12.8 12.8-8.533333 183.466667-157.866667 328.533333-341.333333 328.533333-187.733333 0-341.333333-153.6-341.333333-341.333333s153.6-341.333333 341.333333-341.333333c72.533333 0 140.8 21.333333 196.266667 59.733333h-102.4c-8.533333 0-12.8 4.266667-12.8 12.8v34.133333c0 8.533333 4.266667 12.8 12.8 12.8h226.133333V98.133333c0-8.533333-4.266667-12.8-12.8-12.8h-38.4c-8.533333 0-12.8 4.266667-12.8 12.8v132.266667c-68.266667-59.733333-157.866667-93.866667-256-93.866667-221.866667 0-405.333333 179.2-405.333333 401.066667S290.133333 938.666667 512 938.666667c217.6 0 396.8-170.666667 405.333333-388.266667 0-8.533333-4.266667-12.8-12.8-12.8z"></path>',
 }
 
-/** 根据 LightboxImage 创建一个媒体元素（图片用 <img>，视频用 <video controls>，iframe/embed 用对应标签）。
+/** 根据 LightboxImage 创建一个媒体元素（图片用 <img>，视频用 <video controls>）。
  *  返回的元素不带任何 transform —— goTo 时再设 src 触发加载。 */
 function createMediaEl(item: LightboxImage): HTMLElement {
   if (item.kind === 'image') {
@@ -763,23 +760,15 @@ function createMediaEl(item: LightboxImage): HTMLElement {
     img.alt = ''
     return img
   }
-  if (item.kind === 'video') {
-    const v = document.createElement('video')
-    v.className = 'lb-video'
-    v.controls = true
-    v.preload = 'metadata'
-    v.playsInline = true
-    if (item.poster) v.poster = item.poster
-    v.src = item.src
-    return v
-  }
-  // embed
-  const f = document.createElement('iframe')
-  f.className = 'lb-media-fixed'
-  f.src = item.src
-  f.setAttribute('allowfullscreen', '')
-  f.setAttribute('referrerpolicy', 'no-referrer')
-  return f
+  // video（iframe/embed 已不再收，类型层无 'embed'）
+  const v = document.createElement('video')
+  v.className = 'lb-video'
+  v.controls = true
+  v.preload = 'metadata'
+  v.playsInline = true
+  if (item.poster) v.poster = item.poster
+  v.src = item.src
+  return v
 }
 
 /** 挂模态到 body 末尾 */
@@ -869,7 +858,7 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
   let offsetY = 0
 
   function getTargetEl(): HTMLElement {
-    // 非图片时（video / iframe）getTargetEl 返回 wrap 容器，但 transform 不应用
+    // 非图片时（video）getTargetEl 返回 wrap 容器，但 transform 不应用
     return state.currentTransformEl ?? state.wrap
   }
 
@@ -934,19 +923,22 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
     applyTransform()
   }
 
-  // 计数器更新 + 整组工具栏显隐（缩放旋转仅对 image 有效，视频 / 嵌入时 toolbar 整体淡出 + 下沉）
+  // 计数器更新 + 整组工具栏显隐（缩放旋转仅对 image 有效，视频时 toolbar 整体淡出 + 下沉）
   function updateCounter(): void {
     const item = state.images[state.index]
     counter.textContent = item
-      ? `${state.index + 1} / ${state.images.length}${item.kind !== 'image' ? ` · ${item.kind === 'video' ? '视频' : '嵌入'}` : ''}`
+      ? `${state.index + 1} / ${state.images.length}${item.kind !== 'image' ? ' · 视频' : ''}`
       : `${state.index + 1} / ${state.images.length}`
-    prevBtn.disabled = state.images.length <= 1
-    nextBtn.disabled = state.images.length <= 1
+    // 单张时直接隐藏翻页（按钮灰显会让用户以为是 bug）；多张时始终启用，
+    // 边界处理交给 goTo 内的 index 范围检查即可，next/prev 在头尾禁用 = 仅末尾提示
+    const hasMany = state.images.length > 1
+    prevBtn.hidden = !hasMany
+    nextBtn.hidden = !hasMany
     // toolbar 整组淡入 / 淡出 + 微下沉（CSS 过渡），避免视频底部被工具栏遮挡
     toolbar.classList.toggle('is-empty', !state.currentTransformEl)
   }
 
-  /** 切到指定 index，替换媒体元素。图片用预加载避免闪烁；视频/iframe 直接挂 src。 */
+  /** 切到指定 index，替换媒体元素。图片用预加载避免闪烁；视频直接挂 src。 */
   function goTo(nextIndex: number): void {
     if (nextIndex < 0 || nextIndex >= state.images.length) return
     const item = state.images[nextIndex]
@@ -970,7 +962,7 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
     offsetX = 0
     offsetY = 0
 
-    // 图片走预加载（避免 src 替换空白闪烁）；视频/iframe 不用
+    // 图片走预加载（避免 src 替换空白闪烁）；视频不用
     if (item.kind === 'image') {
       const src = item.src
       const preloader = new Image()
@@ -987,7 +979,7 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
       preloader.src = src
     }
     else {
-      // 视频 / iframe 已经 createMediaEl 时设了 src —— 不需要再动
+      // 视频 createMediaEl 时已经设了 src —— 不需要再动
       // 对视频，再调一次 onloadedmetadata 之后重置 fitScale100（仅视频可视，无意义，跳过）
       updateCounter()
     }
@@ -1057,7 +1049,7 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
   }
 
   wrap.addEventListener('mousedown', (e) => {
-    // 视频 / iframe 上点击视频控件区域不应该触发拖拽
+    // 视频上点击视频控件区域不应该触发拖拽
     if (!state.currentTransformEl) return
     // 只响应左键；Ctrl/Cmd 放行浏览器原生行为
     if (e.button !== 0) return
@@ -1209,7 +1201,7 @@ function mountLightbox(images: LightboxImage[], startIndex: number): void {
     mask.removeEventListener('mousedown', onMaskMouseDown)
   }
 
-  // 初始：图片走预加载拿 onload 再算 fitScale100；视频/iframe 已经挂 src
+  // 初始：图片走预加载拿 onload 再算 fitScale100；视频已经挂 src
   const first = state.images[startIndex]
   if (first && first.kind === 'image') {
     const preloader = new Image()
@@ -1234,18 +1226,15 @@ function closeLightbox(): void {
   const state = openState
   openState = null
   state.cleanup()
-  // 暂停视频 / 清空 iframe src（释放解码内存 + 停掉外网请求）
+  // 暂停视频，释放解码内存
   if (state.media instanceof HTMLVideoElement) {
     state.media.pause()
-  }
-  if (state.media instanceof HTMLIFrameElement) {
-    state.media.src = 'about:blank'
   }
   state.media.remove()
   state.host.remove()
 }
 
-/** document 级 click 事件代理 —— 找到正文内 <img>/<video>/<iframe>/<embed> 就劫持 */
+/** document 级 click 事件代理 —— 找到正文内 <img>/<video> 就劫持（iframe / embed 不再劫持） */
 function onDocClick(e: MouseEvent): void {
   // 已打开时不再处理外部 click（避免误触第二次打开）
   if (openState) return
@@ -1253,7 +1242,13 @@ function onDocClick(e: MouseEvent): void {
   const target = e.target
   if (!(target instanceof Element)) return
   // 找最近的 media 节点
-  const media = target.closest('img, video, iframe, embed')
+  let media = target.closest('img, video')
+  if (!media) {
+    // 点击点在媒体容器空白处（如 <pattl> 包 <ignore_js_op> 包 <img>）时，
+    // target 落到容器上而不是 img —— closest 向上找祖先也找不到。
+    // 主动 querySelector 子树里的第一张候选。
+    media = target.querySelector('img, video')
+  }
   if (!media) return
   if (!isInsideArticleRoot(media)) return
   // SVG / 表情包 / 外站 <a> 包裹：不能进 lightbox，也不能吞事件 —— 让浏览器原生行为照旧
@@ -1268,7 +1263,10 @@ function onDocClick(e: MouseEvent): void {
   openLightboxFromMedia(media)
 }
 
-/** 入口：注册全局 click 代理。重复调用幂等 */
+/** 入口：注册全局 click 代理。重复调用幂等
+ * 同步实现 —— 内部不读 storage，无需 await ensureStorageReady()；
+ * 改为 async 反而引入竞态：两次连续调用之间第一次的 await 还没 resolve，attribute
+ * 还没设上，第二次会重复挂载 click 监听器。保持同步签名最稳。 */
 export function enableLightbox(): void {
   if (document.documentElement.hasAttribute('data-crxjs-lightbox-installed')) return
   document.documentElement.setAttribute('data-crxjs-lightbox-installed', '')

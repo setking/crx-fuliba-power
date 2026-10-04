@@ -37,13 +37,14 @@ const statusLabel: Record<ImageStatus, string> = {
 }
 
 async function loadSessionUuid() {
-  const stored = await chrome.storage.local.get(IMAGE_SESSION_UUID_KEY)
+  // session 级存储：每个浏览器会话重新分配 uuid，崩溃后不会 stale 残留
+  const stored = await chrome.storage.session.get(IMAGE_SESSION_UUID_KEY)
   const existing = stored[IMAGE_SESSION_UUID_KEY]
   if (typeof existing === 'string' && existing) {
     sessionUuid.value = existing
   } else {
     sessionUuid.value = createSessionUuid()
-    await chrome.storage.local.set({ [IMAGE_SESSION_UUID_KEY]: sessionUuid.value })
+    await chrome.storage.session.set({ [IMAGE_SESSION_UUID_KEY]: sessionUuid.value })
   }
 }
 
@@ -98,7 +99,7 @@ async function clearHistory() {
 
 async function refreshSession() {
   sessionUuid.value = createSessionUuid()
-  await chrome.storage.local.set({ [IMAGE_SESSION_UUID_KEY]: sessionUuid.value })
+  await chrome.storage.session.set({ [IMAGE_SESSION_UUID_KEY]: sessionUuid.value })
 }
 
 function buildTask(file: File): ImageTask {

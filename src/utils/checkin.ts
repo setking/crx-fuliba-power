@@ -2,6 +2,15 @@
  * 自动签到相关的小工具
  */
 
+/** chrome.storage.local key：自动签到开关。true = 进论坛自动尝试签到；false = 只在 popup 手动触发。
+ * 属于本模块（utils/checkin）的私有 key，与 popup 共享 —— popup 与 content/checkin.ts 都从这里 import。
+ * utils/storage-init.ts 也 import 以补齐默认值表。 */
+export const AUTO_CHECKIN_ENABLED_KEY = 'autoCheckinEnabled'
+
+/** chrome.storage.local key：上次签到记录。值是 LastCheckin | null。
+ * popup 用它显示"上次签到日期"；本模块的 hasCheckedInToday / markCheckedInToday 用它判断今日是否签过。 */
+export const LAST_CHECKIN_KEY = 'lastCheckin'
+
 interface LastCheckin {
   host: string
   date: string // YYYY-MM-DD
@@ -33,12 +42,10 @@ export function shouldSkipAutoCheckin(hasStoredCheckin: boolean, buttonLabel: st
  * 跨日期则视为没签。
  */
 export async function hasCheckedInToday(host: string): Promise<boolean> {
-  const { lastCheckin } = await chrome.storage.local.get('lastCheckin')
+  const stored = await chrome.storage.local.get(LAST_CHECKIN_KEY)
+  const lastCheckin = stored[LAST_CHECKIN_KEY] as LastCheckin | undefined
   const today = getLocalDateKey()
-  return (
-    (lastCheckin as LastCheckin | undefined)?.host === host
-    && (lastCheckin as LastCheckin | undefined)?.date === today
-  )
+  return lastCheckin?.host === host && lastCheckin?.date === today
 }
 
 /**
@@ -46,7 +53,7 @@ export async function hasCheckedInToday(host: string): Promise<boolean> {
  */
 export async function markCheckedInToday(host: string): Promise<void> {
   await chrome.storage.local.set({
-    lastCheckin: {
+    [LAST_CHECKIN_KEY]: {
       host,
       date: getLocalDateKey(),
     } satisfies LastCheckin,

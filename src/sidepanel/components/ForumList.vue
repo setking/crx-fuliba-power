@@ -28,6 +28,8 @@ const pageCount = computed(() => props.pageCount ?? getPageCount(props.total, pr
 const currentPage = computed(() => normalizePage(props.page, pageCount.value))
 const jumpPage = ref(String(currentPage.value))
 const threads = computed(() => props.kind === 'threads' ? props.items as Thread[] : [])
+// 过滤掉空行：Discuz 偶发返回 title/url 都为空的分隔行（issue: 帖子列表出现空白 <li>）。
+const displayedThreads = computed(() => threads.value.filter(t => t.title && t.url))
 const favorites = computed(() => props.kind === 'favorites' ? props.items as Favorite[] : [])
 const friends = computed(() => props.kind === 'friends' ? props.items as Friend[] : [])
 const searchResults = computed(() => props.kind === 'search' ? props.items as SearchResult[] : [])
@@ -64,7 +66,7 @@ function jumpToPage() {
     </div>
 
     <ul v-else-if="kind === 'threads'" class="list">
-      <li v-for="thread in threads" :key="thread.id || thread.url" class="item thread-item" @click="emit('open', thread.url)">
+      <li v-for="thread in displayedThreads" :key="thread.id || thread.url" class="item thread-item" @click="emit('open', thread.url)">
         <div class="thread-title">
           {{ thread.title }}
         </div>

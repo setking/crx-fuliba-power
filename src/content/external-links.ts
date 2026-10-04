@@ -7,9 +7,11 @@
  * 入口：enableExternalLinksPanel() —— 在 isViewthreadPage() 命中时调用
  */
 
+// EXTERNAL_LINKS_PANEL_ID / extractPostExternalLinks / isViewthreadPage / type ExternalLink / applyPanelTheme / buildThemedStyle / markThemedHost / ensureStorageReady 都在下方主体使用
 import { EXTERNAL_LINKS_PANEL_ID } from '@/global'
 import { extractPostExternalLinks, isViewthreadPage, type ExternalLink } from '@/utils/hidden-links'
 import { applyPanelTheme, buildThemedStyle, markThemedHost } from '@/utils/panel-theme'
+import { ensureStorageReady } from '@/utils/storage-init'
 
 const EXTERNAL_LINKS_BASE_CSS =
   [
@@ -330,6 +332,9 @@ function debounced(fn: () => void, waitMs: number): () => void {
 
 /** 在 viewthread 详情页启用外站链接面板 */
 export async function enableExternalLinksPanel(): Promise<void> {
+  // 等 storage 默认值补齐后再启动（一致性：与其它 content 模块入口保持一致的"等服务就绪"）
+  await ensureStorageReady()
+
   // 论坛脚本异步插入楼层，初次挂载不一定有；改为：检测到楼主楼层出现后立即挂载
   const tryMount = () => {
     const opPost = findOpPost()

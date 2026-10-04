@@ -12,7 +12,9 @@
 import type { WhatslinkInfo } from '@/type'
 
 const API = 'https://www.whatslink.info/api/v1/link?url='
-const CACHE_KEY = 'whatslinkCache'
+/** chrome.storage.local key：whatslink 磁链元数据缓存，hash → WhatslinkInfo。
+ * 属于本模块私有 —— utils/storage-init.ts 通过 import 引用以登记到 LOCAL_STORAGE_DEFAULTS 默认值表。 */
+export const WHATSLINK_CACHE_KEY = 'whatslinkCache'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const CACHE_MAX = 100
 const TIMEOUT_MS = 8000
@@ -37,12 +39,12 @@ function pruneCache(cache: CacheMap): CacheMap {
 }
 
 async function readCache(): Promise<CacheMap> {
-  const result = await chrome.storage.local.get([CACHE_KEY])
-  return (result[CACHE_KEY] as CacheMap | undefined) ?? {}
+  const result = await chrome.storage.local.get([WHATSLINK_CACHE_KEY])
+  return (result[WHATSLINK_CACHE_KEY] as CacheMap | undefined) ?? {}
 }
 
 async function writeCache(cache: CacheMap): Promise<void> {
-  await chrome.storage.local.set({ [CACHE_KEY]: pruneCache(cache) })
+  await chrome.storage.local.set({ [WHATSLINK_CACHE_KEY]: pruneCache(cache) })
 }
 
 /** 把 whatslink 原始 JSON 归一化为 WhatslinkInfo */

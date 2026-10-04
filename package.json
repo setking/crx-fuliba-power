@@ -1,7 +1,7 @@
 {
-  "name": "fuliba power",
+  "name": "fuliba-power",
   "type": "module",
-  "version": "1.0.14",
+  "version": "1.0.17",
   "private": true,
   "scripts": {
     "dev": "vite",

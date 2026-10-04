@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, type Ref } from 'vue'
 // DEFAULT_PAGE_SIZE / FLOAT_BTN_HIDDEN_KEY / MESSAGE_TYPES / SIDEPANEL_ALIVE_PORT 都在下方主体中使用
 import { DEFAULT_PAGE_SIZE, FLOAT_BTN_HIDDEN_KEY, MESSAGE_TYPES, SIDEPANEL_ALIVE_PORT } from '@/global'
 import type { Favorite, ForumCount, ForumCounts, ForumTab, Friend, LoginStatus, Thread } from '@/type'
+import type { ThreadPageResult } from '@/utils/forum-api'
 import ForumList from '@/sidepanel/components/ForumList.vue'
 import ImageHostView from '@/sidepanel/components/ImageHostView.vue'
 import SearchView from '@/sidepanel/components/SearchView.vue'
@@ -130,7 +131,7 @@ async function loadCounts(): Promise<boolean> {
     threadsCount.value = counts.threads
     favoritesCount.value = counts.favorites
     friendsCount.value = counts.friends
-    threadsPage.value = normalizePage(threadsPage.value, pageCountFor(threadsCount.value))
+    threadsPage.value = normalizePage(threadsPage.value, threadsPageCount())
     favoritesPage.value = normalizePage(favoritesPage.value, pageCountFor(favoritesCount.value))
     friendsPage.value = normalizePage(friendsPage.value, pageCountFor(friendsCount.value))
     countsState.value = 'idle'
@@ -154,6 +155,18 @@ function pageCountFor(count: ForumCount | null): number {
   return getPageCount(totalFor(count), DEFAULT_PAGE_SIZE)
 }
 
+/** Thread 路径专用的页数估算 —— space 模板不渲染页码数字，count.pages=null。
+ * 仅靠"已加载条数 + 1（保守留下一页让翻页条渲染）"估算。
+ * - reachedEnd=true：返回已加载条数对应的真实页数（不再多算）
+ * - reachedEnd=false：额外 +1 让分页条渲染"下一页"按钮（server 是否真有下一页由 hasMore 信号决定）
+ * - 完全没加载时返回 1（不渲染分页条，等用户先打开第一页再说）。 */
+function threadsPageCount(): number {
+  const loaded = threadsCache.value.items.length
+  const pageSize = threadsCount.value?.pageSize ?? threadsCache.value.firstBatchSize ?? DEFAULT_PAGE_SIZE
+  const loadedPages = Math.max(1, Math.ceil(loaded / pageSize))
+  return threadsCache.value.reachedEnd ? loadedPages : loadedPages + 1
+}
+
 
 /** 拉一页数据。
  *
@@ -163,6 +176,17 @@ function pageCountFor(count: ForumCount | null): number {
  * 才会向上冒泡到 loadList → UI 显示「加载{label}失败：…」。 */
 async function fetchPage<T>(page: number, messageType: string): Promise<T[]> {
   return fetchViaContent<T[]>(activeTabId.value!, messageType, { page })
+}
+
+/** Thread 路径专属：服务器返回 { items, hasMore }，hasMore 来自 .pg .nxt 是否存在。
+ * space 模板不渲染页码数字，"还有没有下一页"必须靠这个链接探测，
+ * 不能用 items.length 启发式（满页也可能到底）。 */
+async function fetchThreadPage(page: number): Promise<ThreadPageResult> {
+  return fetchViaContent<ThreadPageResult>(
+    activeTabId.value!,
+    MESSAGE_TYPES.FETCH_THREADS,
+    { page },
+  )
 }
 
 async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, messageType: string): Promise<void> {
@@ -190,6 +214,56 @@ async function ensureCached<T>(cache: RequestCache<T>, targetCount: number, mess
       // - 抛错让用户以为扩展坏了，实际论坛 page>1 偶发 0 条是已知常态
       // 现在统一按「服务端返回啥就信啥」处理 —— 0 条直接结束，后续翻页由
       // reachedEnd 自然兜住，UI 永远显示「已加载 N 条」而不闪错误。
+      if (items.length === 0) {
+        cache.reachedEnd = true
+        break
+      }
+
+      const previousBatchSize = cache.firstBatchSize
+      if (cache.firstBatchSize === null) cache.firstBatchSize = items.length
+      cache.items.push(...items)
+      if (previousBatchSize !== null && items.length < batchSize) {
+        cache.reachedEnd = true
+        break
+      }
+    }
+  }
+}
+
+/** Thread 路径的 ensureCached：消费 ThreadPageResult 而非裸 items。
+ * hasMore=false 时立即设 reachedEnd=true，不依赖 items 数启发式。 */
+async function ensureCachedThreads(cache: RequestCache<Thread>, targetCount: number): Promise<void> {
+  if (!activeTabId.value) throw new Error('找不到当前标签页')
+
+  while (!cache.reachedEnd && cache.items.length < targetCount) {
+    const remaining = targetCount - cache.items.length
+    const batchSize = cache.firstBatchSize ?? DEFAULT_PAGE_SIZE
+    const pagesToRequest = getRequestPageCount(remaining, batchSize)
+    let requestedPages = 0
+
+    while (
+      requestedPages < pagesToRequest
+      && !cache.reachedEnd
+      && cache.items.length < targetCount
+    ) {
+      const page = cache.nextRequestPage
+      const result = await fetchThreadPage(page)
+      const items = result.items
+      cache.nextRequestPage = page + 1
+      requestedPages += 1
+
+      // space 模板下：服务器给出 hasMore=false（无 .pg .nxt 链接）= 真正到底，
+      // 此时 items 可能非空（最后一页不满 pageSize），不能再依赖 items 启发式。
+      if (result.hasMore === false) {
+        if (items.length > 0) {
+          if (cache.firstBatchSize === null) cache.firstBatchSize = items.length
+          cache.items.push(...items)
+        }
+        cache.reachedEnd = true
+        break
+      }
+
+      // 通用 0 条断尾（兼容 guide 模板和 space 模板网络异常）。
       if (items.length === 0) {
         cache.reachedEnd = true
         break
@@ -261,15 +335,44 @@ async function loadList<T>(
   }
 }
 
+/** Thread 路径特化版 —— 不走 loadList：
+ * - fetch 返回 ThreadPageResult（含 hasMore 信号），不是裸 items
+ * - space 模板下 pages=null（不渲染页码数字），不能靠 pageCountFor 截断 page
+ *   → pageCountFor 直接返回 Infinity 让 normalizePage 不过早截断
+ * - 真实页数由 server hasMore 信号 + items 启发式共同决定，见 ensureCachedThreads
+ */
 async function loadThreads(page = threadsPage.value) {
-  return loadList({
-    cache: threadsCache,
-    count: threadsCount,
-    page: threadsPage,
-    state: threadsState,
-    messageType: MESSAGE_TYPES.FETCH_THREADS,
-    label: '帖子',
-  }, page)
+  if (!activeTabId.value) activeTabId.value = await getActiveTab().then(t => t?.id ?? null)
+  if (!activeTabId.value) {
+    errorMsg.value = '找不到当前标签页'
+    threadsState.value = 'error'
+    return
+  }
+  // space 模板下 count.pages=null 且 count.total 也常为 null，不能用 pageCountFor 截断。
+  // pageCountFor 在 (pages=null, total=null) 时会返回 1 → normalizePage 把 page 截到 1，
+  // 用户翻不到第二页。threadsPath 直接放行 page。
+  const nextPage = Math.max(1, page)
+  threadsPage.value = nextPage
+  threadsState.value = 'loading'
+  errorMsg.value = ''
+  try {
+    await ensureCachedThreads(
+      threadsCache.value,
+      targetItemsForPage(nextPage, threadsCount.value),
+    )
+    // count 兜底：与 loadList 同语义（防御性补 total / pages）。
+    if (threadsCount.value?.total === null) {
+      threadsCount.value = { ...threadsCount.value, total: threadsCache.value.items.length }
+    }
+    else if (threadsCount.value === null) {
+      threadsCount.value = { total: threadsCache.value.items.length, pageSize: threadsCache.value.firstBatchSize, pages: null }
+    }
+    threadsState.value = 'idle'
+  }
+  catch (e) {
+    errorMsg.value = `加载帖子失败：${(e as Error).message}`
+    threadsState.value = 'error'
+  }
 }
 
 async function loadFavorites(page = favoritesPage.value) {
@@ -484,7 +587,7 @@ async function loadThemeState() {
       </div>
 
       <ForumList v-if="activeTab === 'threads'" kind="threads" :items="threads" :loading="threadsState === 'loading'"
-        :page="threadsPage" :page-count="pageCountFor(threadsCount)" :total="threadsCount?.total ?? null"
+        :page="threadsPage" :page-count="threadsPageCount()" :total="threadsCount?.total ?? null"
         :page-size="DEFAULT_PAGE_SIZE" empty-text="暂无帖子" @open="openInTab" @page-change="changeThreadsPage" />
 
       <ForumList v-else-if="activeTab === 'favorites'" kind="favorites" :items="favorites"

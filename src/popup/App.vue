@@ -1,8 +1,11 @@
 <script setup lang="ts">
+// computed / onMounted / onUnmounted / ref / BJX_AUTO_PREVIEW_KEY / ENABLED_SITES / MESSAGE_TYPES / type ForumTheme / LoginStatus / isEnabledSite / ensureStorageReady / FORUM_THEME_KEY / AUTO_CHECKIN_ENABLED_KEY / LAST_CHECKIN_KEY 都在下方主体使用
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { BJX_AUTO_PREVIEW_KEY, ENABLED_SITES, MESSAGE_TYPES } from '@/global'
 import type { ForumTheme, LoginStatus } from '@/type'
+import { AUTO_CHECKIN_ENABLED_KEY, LAST_CHECKIN_KEY } from '@/utils/checkin'
 import { isEnabledSite } from '@/utils/sites'
+import { ensureStorageReady } from '@/utils/storage-init'
 import { FORUM_THEME_KEY } from '@/utils/theme'
 
 type Status = 'loading' | 'enabled' | 'disabled'
@@ -54,6 +57,14 @@ function handleStorageChange(changes: Record<string, chrome.storage.StorageChang
 }
 
 onMounted(async () => {
+  // 等 storage 默认值补齐后再读取（与 content 模块入口一致的"等服务就绪"约束）
+  try {
+    await ensureStorageReady()
+  }
+  catch (err) {
+    console.warn('[popup] storage init 失败:', err)
+  }
+
   try {
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -82,10 +93,10 @@ onMounted(async () => {
   }
 
   // 读取自动签到开关 & 上次签到日期 & 主题
-  const stored = await chrome.storage.local.get(['autoCheckinEnabled', 'lastCheckin', BJX_AUTO_PREVIEW_KEY, FORUM_THEME_KEY])
-  if (stored.autoCheckinEnabled === false) autoCheckinEnabled.value = false
+  const stored = await chrome.storage.local.get([AUTO_CHECKIN_ENABLED_KEY, LAST_CHECKIN_KEY, BJX_AUTO_PREVIEW_KEY, FORUM_THEME_KEY])
+  if (stored[AUTO_CHECKIN_ENABLED_KEY] === false) autoCheckinEnabled.value = false
   if (stored[BJX_AUTO_PREVIEW_KEY] === false) autoPreviewEnabled.value = false
-  const last = stored.lastCheckin as { host: string; date: string } | undefined
+  const last = stored[LAST_CHECKIN_KEY] as { host: string; date: string } | undefined
   if (last?.host === currentHost.value) {
     lastCheckinDate.value = last.date
   }
@@ -100,7 +111,7 @@ onUnmounted(() => {
 
 async function toggleAutoCheckin() {
   autoCheckinEnabled.value = !autoCheckinEnabled.value
-  await chrome.storage.local.set({ autoCheckinEnabled: autoCheckinEnabled.value })
+  await chrome.storage.local.set({ [AUTO_CHECKIN_ENABLED_KEY]: autoCheckinEnabled.value })
 }
 
 async function toggleAutoPreview() {

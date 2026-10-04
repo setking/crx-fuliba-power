@@ -21,9 +21,10 @@
 
 ## 1. 项目性质
 
-Chrome MV3 扩展，针对两个 Discuz! 论坛：
+Chrome MV3 扩展，针对三个站点：
 
 - `https://fuliba2025.net/*`（WordPress 文章站）
+- `https://fuliba2023.net/*`（WordPress 文章站，与 fuliba2025.net 同样的权限和行为）
 - `https://www.wnflb2023.com/*`（Discuz! 论坛）
 
 **核心能力**：自动签到 / 论坛数据看板（Side Panel）/ popup ↔ content 状态联动 / 百家姓 & 油管链接转换 / 外站链接面板 / 图床 / 浮动按钮打开 Side Panel。
@@ -102,7 +103,15 @@ pnpm build              # 仅发布产物 / 用户要求时才跑（vue-tsc -b &
 
 - `permissions: ['sidePanel', 'contentSettings', 'tabs', 'storage', 'alarms']`
 - `host_permissions: ['<all_urls>']` —— 仅 content script 内部跨域请求使用
-- `chrome.storage.local` 仅写：`autoCheckinEnabled` / `lastCheckin` / `whatslinkCache` / `imageHostHistory` / `imageHostSessionUuid` / `floatBtnPosition` / `bjxAutoPreview` / `forumTheme`
+- `chrome.storage.local` 仅写：`autoCheckinEnabled` / `lastCheckin` / `whatslinkCache` / `imageHostHistory` / `floatBtnPosition` / `bjxAutoPreview` / `forumTheme`
+- `chrome.storage.session` 仅写：`floatBtnHidden` / `imageHostSessionUuid`（会话级：浏览器关掉自动清空，避免崩溃残留 stale 值跨会话）
+  > 注意：`imageHostSessionUuid` 已从 local 迁到 session（避免崩溃残留 stale）。老用户首次升级由 `ensureStorageReady()` 一次性迁移：local 有值则搬到 session 并清 local。
+- 缺失键默认值由 `ensureStorageReady()` 幂等补齐。三处入口会触发 init：
+  1. **service worker 顶层 `void ensureStorageReady()`** —— SW 是最早醒来的上下文，冷启浏览器 + 重载扩展后无需任何 UI 触发就能补齐所有默认值；content / popup / sidepanel 入口的 await 是幂等的"二次保险"。
+  2. content 模块入口（`autoCheckin` / `mountFloatButton` / `enableExternalLinksPanel` / `enableBjxTransform` / `enableLightbox` / `enableForumThemeWatcher`）—— `await ensureStorageReady()`，然后才读 storage。
+  3. popup / sidepanel `onMounted` 顶部 `await ensureStorageReady()`（try/catch 兜底）。
+
+  默认值表声明见 `src/utils/storage-init.ts`（`LOCAL_STORAGE_DEFAULTS` / `SESSION_STORAGE_DEFAULTS`）—— 不放在 `src/global.ts` 是因为 `manifest.config.ts` 会直接 import `global.ts`，而 vite.config 在自身打包阶段 esbuild 还看不到 `resolve.alias`，任何从 `global.ts` 出去的 `@/...` 路径都会让构建报 UNRESOLVED_IMPORT。
 - **不存放** token / cookie / 密码 / 论坛账号凭证
 - 加新 permission 必须同步更新 `manifest.config.ts`
 
